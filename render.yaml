@@ -1,0 +1,39 @@
+services:
+  - type: web
+    name: rainier-gate-waits
+    runtime: docker
+    plan: starter
+    region: oregon
+    healthCheckPath: /api/v1/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: RAINIER_HOST
+        value: 0.0.0.0
+      - key: RAINIER_PORT
+        value: 10000
+      - key: RAINIER_DB_PATH
+        value: /data/rainier_waits.sqlite3
+      - key: ENABLE_BACKGROUND_POLLING
+        value: true
+      - key: POLL_INTERVAL_SECONDS
+        value: 900
+      - key: POLL_START_HOUR_LOCAL
+        value: 6
+      - key: POLL_END_HOUR_LOCAL
+        value: 20
+      - key: TRUST_PROXY_HEADERS
+        value: true
+      - key: RAINIER_HASH_SECRET
+        generateValue: true
+      - key: RAINIER_ADMIN_TOKEN
+        generateValue: true
+      - key: GOOGLE_ROUTES_API_KEY
+        sync: false
+      - key: NPS_API_KEY
+        sync: false
+      - key: WSDOT_ACCESS_CODE
+        sync: false
+    disk:
+      name: rainier-data
+      mountPath: /data
+      sizeGB: 1

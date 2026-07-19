@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Experimental estimates and forecasts for vehicle waits at Mount Rainier National Park entrance gates." />
+  <title>Rainier Gate Waits</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <header class="site-header">
+    <div class="shell header-inner">
+      <a class="brand" href="#top" aria-label="Rainier Gate Waits home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 56 44" role="img">
+            <path d="M4 39 20 16l7 8L35 8l17 31H4Z" fill="currentColor" opacity=".28"/>
+            <path d="m4 39 16-23 7 8L35 8l17 31" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <span>
+          <strong>Rainier Gate Waits</strong>
+          <small>Experimental entrance estimates</small>
+        </span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="#current">Current waits</a>
+        <a href="#plan">Plan a visit</a>
+        <a href="#report">Report a wait</a>
+        <a href="#method">How it works</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="top">
+      <div class="shell hero-grid">
+        <div>
+          <p class="eyebrow">Mount Rainier National Park</p>
+          <h1>Know the line before you reach the gate.</h1>
+          <p class="hero-copy">Live entrance-delay estimates, hourly forecasts, and verified visitor reports for the park’s busiest approaches.</p>
+          <div class="hero-actions">
+            <a class="button primary" href="#current">See current waits</a>
+            <a class="button secondary" href="#report">Start a wait timer</a>
+          </div>
+          <p class="status-line"><span class="live-dot" aria-hidden="true"></span><span id="last-updated">Loading estimates…</span><span id="data-mode-badge" class="data-mode-badge demo">Checking data mode</span></p>
+        </div>
+
+        <aside class="hero-summary" aria-label="Current system summary">
+          <div class="summary-item">
+            <span>Longest current wait</span>
+            <strong id="longest-wait">35–50 min</strong>
+          </div>
+          <div class="summary-item">
+            <span>Best major entrance now</span>
+            <strong id="best-entrance">White River</strong>
+          </div>
+          <div class="summary-item">
+            <span>Estimates with recent reports</span>
+            <strong id="report-coverage">2 of 3</strong>
+          </div>
+          <p class="experimental-note">Prototype only. Do not use as an official park information source.</p>
+        </aside>
+      </div>
+    </section>
+
+    <section class="section" id="current">
+      <div class="shell">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Right now</p>
+            <h2>Current entrance waits</h2>
+          </div>
+          <div class="legend" aria-label="Confidence legend">
+            <span><i class="confidence high"></i>High confidence</span>
+            <span><i class="confidence medium"></i>Medium</span>
+            <span><i class="confidence low"></i>Limited data</span>
+          </div>
+        </div>
+
+        <div id="entrance-cards" class="card-grid" aria-live="polite"></div>
+
+        <div class="map-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Approach overview</p>
+              <h3>Entrance conditions map</h3>
+            </div>
+            <p>Illustrative schematic for the prototype</p>
+          </div>
+
+          <div class="map-layout">
+            <div class="schematic-map" role="img" aria-label="Schematic map showing Nisqually and White River entrances around Mount Rainier">
+              <svg viewBox="0 0 760 470">
+                <defs>
+                  <radialGradient id="mountain" cx="50%" cy="42%" r="52%">
+                    <stop offset="0" stop-color="#dce8e2" />
+                    <stop offset="1" stop-color="#edf3ef" />
+                  </radialGradient>
+                </defs>
+                <path class="park-shape" d="M280 45c90-25 202 8 270 81 63 67 103 181 56 259-48 80-179 86-278 66-91-18-196-63-210-146-16-96 65-224 162-260Z" />
+                <circle cx="390" cy="236" r="132" fill="url(#mountain)" />
+                <path class="mountain-line" d="m285 306 71-109 28 35 50-93 80 167" />
+                <path class="snow-line" d="m356 197 28 35 50-93 30 57-31-11-21 25-28-16-18 20Z" />
+                <text x="388" y="338" text-anchor="middle" class="map-label park-name">MOUNT RAINIER</text>
+
+                <path class="road" d="M22 368 C112 360 139 343 208 323 C247 312 263 303 285 292" />
+                <path class="road" d="M704 60 C642 80 600 110 551 150 C518 177 495 194 472 215" />
+
+                <path id="nisqually-queue-line" class="queue-line severe" d="M58 364 C116 358 151 343 207 324" />
+                <path id="white-river-queue-line" class="queue-line moderate" d="M665 75 C622 93 593 116 555 146" />
+
+                <g class="gate-marker" transform="translate(210 323)">
+                  <circle r="10" />
+                  <text x="18" y="-8">Nisqually</text>
+                  <text id="map-nisqually" x="18" y="12" class="map-wait">35–50 min</text>
+                </g>
+                <g class="gate-marker" transform="translate(551 149)">
+                  <circle r="10" />
+                  <text x="-18" y="-10" text-anchor="end">White River</text>
+                  <text id="map-white-river" x="-18" y="12" text-anchor="end" class="map-wait">10–20 min</text>
+                </g>
+
+                <text x="25" y="395" class="road-label">WA-706 / Ashford</text>
+                <text x="611" y="52" class="road-label">WA-410</text>
+              </svg>
+            </div>
+
+            <aside class="conditions-panel">
+              <h4>Operational notes</h4>
+              <div id="alerts-list"></div>
+              <a class="text-link" href="#method">See data sources and limitations →</a>
+            </aside>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section muted" id="plan">
+      <div class="shell">
+        <div class="section-heading compact">
+          <div>
+            <p class="eyebrow">Before you leave</p>
+            <h2>Plan a lower-wait arrival</h2>
+          </div>
+          <p class="section-intro">Choose an entrance and day to compare estimated waits throughout the day.</p>
+        </div>
+
+        <div class="planner">
+          <form class="planner-controls" id="planner-form">
+            <label>
+              Entrance
+              <select id="planner-entrance" name="entrance">
+                <option value="nisqually">Nisqually</option>
+                <option value="white-river">White River</option>
+              </select>
+            </label>
+            <label>
+              Visit date
+              <input id="planner-date" type="date" name="date" />
+            </label>
+            <label>
+              Day type
+              <select id="planner-day-type" name="dayType">
+                <option value="weekday">Weekday</option>
+                <option value="weekend" selected>Weekend</option>
+                <option value="holiday">Holiday weekend</option>
+              </select>
+            </label>
+          </form>
+
+          <div class="forecast-wrap">
+            <div class="forecast-summary">
+              <div>
+                <span>Recommended arrival window</span>
+                <strong id="recommended-window">Before 8:00 a.m.</strong>
+              </div>
+              <div>
+                <span>Expected peak</span>
+                <strong id="expected-peak">11:00 a.m.–2:00 p.m.</strong>
+              </div>
+            </div>
+            <div id="forecast-chart" class="forecast-chart" aria-label="Hourly wait forecast"></div>
+            <p class="forecast-caption" id="forecast-caption">Loading planning ranges…</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="report">
+      <div class="shell report-grid">
+        <div>
+          <p class="eyebrow">Improve the estimate</p>
+          <h2>Report your gate wait</h2>
+          <p>Start the timer when you reach the back of the entrance line. Stop it after completing the gate transaction. In a production version, geolocation could suggest both steps while retaining only an anonymized wait record.</p>
+          <div class="privacy-note">
+            <strong>Privacy-first default</strong>
+            <span>Store the entrance, start time, duration, and broad queue position—not a visitor’s full route.</span>
+          </div>
+        </div>
+
+        <div class="timer-card">
+          <label>
+            Entrance
+            <select id="timer-entrance">
+              <option value="nisqually">Nisqually</option>
+              <option value="white-river">White River</option>
+            </select>
+          </label>
+          <div class="timer-display" id="timer-display">00:00:00</div>
+          <p id="timer-status">Timer has not started.</p>
+          <div class="timer-actions">
+            <button class="button primary" type="button" id="start-timer">Start timer</button>
+            <button class="button secondary" type="button" id="stop-timer" disabled>Stop and review</button>
+          </div>
+          <div id="timer-result" class="timer-result" hidden></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section dark" id="method">
+      <div class="shell">
+        <div class="section-heading compact light-heading">
+          <div>
+            <p class="eyebrow">Transparent by design</p>
+            <h2>How the estimate is built</h2>
+          </div>
+          <p class="section-intro">Every estimate should show its age, contributing signals, and confidence—not just a single number.</p>
+        </div>
+
+        <div class="method-grid">
+          <article>
+            <span class="step-number">01</span>
+            <h3>Measure approach delay</h3>
+            <p>Compare traffic-aware travel time on a fixed approach segment with its normal travel time.</p>
+          </article>
+          <article>
+            <span class="step-number">02</span>
+            <h3>Verify with visitor timers</h3>
+            <p>Use recent completed waits to calibrate the traffic signal and identify the actual back of the queue.</p>
+          </article>
+          <article>
+            <span class="step-number">03</span>
+            <h3>Account for disruptions</h3>
+            <p>Flag roadwork, crashes, closures, weather, and gate-hour changes that can mimic or alter a normal entrance queue.</p>
+          </article>
+          <article>
+            <span class="step-number">04</span>
+            <h3>Forecast comparable days</h3>
+            <p>Blend recent conditions with historical waits for the same entrance, season, weekday, hour, and weather pattern.</p>
+          </article>
+        </div>
+
+        <div class="source-strip">
+          <span>Potential production inputs</span>
+          <ul>
+            <li>Traffic-routing API</li>
+            <li>Visitor wait timers</li>
+            <li>NPS alerts and entrance status</li>
+            <li>WSDOT incidents and closures</li>
+            <li>Weather observations</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell footer-inner">
+      <div>
+        <strong>Rainier Gate Waits</strong>
+        <p>Independent experimental concept. Not affiliated with or endorsed by the National Park Service.</p>
+      </div>
+      <p>Local MVP · Live-feed ready</p>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

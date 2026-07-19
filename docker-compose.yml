@@ -1,0 +1,22 @@
+services:
+  rainier-gate-waits:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      RAINIER_HOST: 0.0.0.0
+      RAINIER_DB_PATH: /data/rainier_waits.sqlite3
+      POLL_INTERVAL_SECONDS: 900
+      POLL_START_HOUR_LOCAL: 6
+      POLL_END_HOUR_LOCAL: 20
+      GOOGLE_ROUTES_API_KEY: ${GOOGLE_ROUTES_API_KEY:-}
+      NPS_API_KEY: ${NPS_API_KEY:-}
+      WSDOT_ACCESS_CODE: ${WSDOT_ACCESS_CODE:-}
+      RAINIER_ADMIN_TOKEN: ${RAINIER_ADMIN_TOKEN:-}
+      RAINIER_HASH_SECRET: ${RAINIER_HASH_SECRET:-replace-before-public-deployment}
+    volumes:
+      - rainier-data:/data
+    restart: unless-stopped
+
+volumes:
+  rainier-data:
