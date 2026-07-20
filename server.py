@@ -281,23 +281,93 @@ def parse_google_duration(value: str | None) -> int:
     return max(0, round(float(value[:-1])))
 
 
+HTTP_ERROR_BODY_LIMIT = 4000
+
+
+def redact_secrets(text: str, sensitive_values: list[str] | tuple[str, ...] = ()) -> str:
+    '''Remove credentials from diagnostic text before it reaches application logs.'''
+    redacted = text
+    known_values = {
+        value for value in (
+            *sensitive_values,
+            GOOGLE_ROUTES_API_KEY,
+            NPS_API_KEY,
+            WSDOT_ACCESS_CODE,
+            ADMIN_TOKEN,
+        ) if value and len(value) >= 4
+    }
+    for value in sorted(known_values, key=len, reverse=True):
+        redacted = redacted.replace(value, '[REDACTED]')
+
+    # Defense in depth for Google-style API keys and credentials echoed as fields.
+    redacted = re.sub(r'AIza[0-9A-Za-z_-]{20,}', '[REDACTED_GOOGLE_API_KEY]', redacted)
+    redacted = re.sub(
+        r'''(?ix)(["']?(?:api[_-]?key|access[_-]?code|authorization|token|secret)["']?\s*[:=]\s*["']?)([^"'\s&,}]+)''',
+        r'\1[REDACTED]',
+        redacted,
+    )
+    return redacted
+
+
+def format_http_error(
+    exc: urllib.error.HTTPError,
+    *,
+    sensitive_values: list[str] | tuple[str, ...] = (),
+) -> str:
+    '''Return a single-line, size-limited, credential-safe HTTP error message.'''
+    try:
+        raw = exc.read(HTTP_ERROR_BODY_LIMIT + 1)
+    except Exception:
+        raw = b''
+    truncated = len(raw) > HTTP_ERROR_BODY_LIMIT
+    raw = raw[:HTTP_ERROR_BODY_LIMIT]
+    body_text = raw.decode('utf-8', errors='replace').strip()
+
+    if body_text:
+        try:
+            body_text = json.dumps(
+                json.loads(body_text),
+                ensure_ascii=False,
+                separators=(',', ':'),
+            )
+        except json.JSONDecodeError:
+            body_text = ' '.join(body_text.split())
+        body_text = redact_secrets(body_text, sensitive_values)
+        if truncated:
+            body_text += ' …[truncated]'
+    else:
+        body_text = 'no response body'
+
+    reason = str(exc.reason or 'HTTP error')
+    return f'HTTP {exc.code} {reason}: {body_text}'
+
+
 def http_json(
     url: str,
     *,
-    method: str = "GET",
+    method: str = 'GET',
     headers: dict[str, str] | None = None,
     body: dict[str, Any] | None = None,
     timeout: int = 20,
 ) -> Any:
-    payload = None if body is None else json.dumps(body).encode("utf-8")
+    payload = None if body is None else json.dumps(body).encode('utf-8')
     request = urllib.request.Request(url, data=payload, method=method)
-    request.add_header("User-Agent", "RainierGateWaits/0.4 (+public pilot)")
+    request.add_header('User-Agent', 'RainierGateWaits/0.4 (+public pilot)')
     if body is not None:
-        request.add_header("Content-Type", "application/json")
-    for key, value in (headers or {}).items():
+        request.add_header('Content-Type', 'application/json')
+    request_headers = headers or {}
+    for key, value in request_headers.items():
         request.add_header(key, value)
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        return json.loads(response.read().decode("utf-8"))
+
+    sensitive_values = [
+        value for key, value in request_headers.items()
+        if any(marker in key.lower() for marker in ('key', 'token', 'authorization', 'secret', 'code'))
+    ]
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode('utf-8'))
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(format_http_error(exc, sensitive_values=sensitive_values)) from exc
 
 
 def store_traffic_snapshot(

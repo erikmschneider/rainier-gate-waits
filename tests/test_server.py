@@ -1,7 +1,10 @@
+import io
+import json
 import os
 import sys
 import tempfile
 import unittest
+import urllib.error
 from unittest import mock
 from datetime import datetime, timezone
 from pathlib import Path
@@ -43,6 +46,39 @@ class ServerTests(unittest.TestCase):
         for entrance in payload["entrances"]:
             self.assertLessEqual(entrance["min"], entrance["max"])
             self.assertIn(entrance["status"], {"clear", "moderate", "severe"})
+
+    def test_http_error_body_is_logged_without_exposing_api_key(self):
+        api_key = "AIza" + "A" * 35
+        response_body = json.dumps({
+            "error": {
+                "code": 403,
+                "status": "PERMISSION_DENIED",
+                "message": f"API key {api_key} is not authorized for Routes API",
+            }
+        }).encode("utf-8")
+        error = urllib.error.HTTPError(
+            "https://routes.googleapis.com/directions/v2:computeRoutes",
+            403,
+            "Forbidden",
+            {},
+            io.BytesIO(response_body),
+        )
+
+        with mock.patch("urllib.request.urlopen", side_effect=error):
+            with self.assertRaises(RuntimeError) as raised:
+                server.http_json(
+                    "https://routes.googleapis.com/directions/v2:computeRoutes",
+                    method="POST",
+                    headers={"X-Goog-Api-Key": api_key},
+                    body={"origin": {}},
+                )
+
+        message = str(raised.exception)
+        self.assertIn("HTTP 403 Forbidden", message)
+        self.assertIn("PERMISSION_DENIED", message)
+        self.assertIn("Routes API", message)
+        self.assertNotIn(api_key, message)
+        self.assertIn("[REDACTED", message)
 
     def test_google_request_uses_pro_fields_for_two_entrances(self):
         captured = []
