@@ -1,55 +1,54 @@
-const fallbackEntrances = {
-  "nisqually": {
+const unavailableEntrances = {
+  nisqually: {
     id: "nisqually",
     name: "Nisqually Entrance",
     approach: "From Ashford via WA-706",
-    min: 35,
-    median: 42,
-    max: 50,
-    queueMiles: 2.4,
-    trend: "Rising",
-    confidence: "Low",
-    confidenceScore: 42,
+    min: null,
+    median: null,
+    max: null,
+    queueMiles: null,
+    trend: "Unavailable",
+    confidence: "Unavailable",
+    confidenceScore: 0,
     reports: 0,
-    updatedMinutes: 0,
-    status: "severe",
-    statusLabel: "Heavy delay",
-    dataMode: "browser-fallback"
+    updatedMinutes: null,
+    status: "unavailable",
+    statusLabel: "Estimate unavailable",
+    dataMode: "unavailable",
+    displayable: false,
+    freshnessStatus: "unavailable"
   },
   "white-river": {
     id: "white-river",
     name: "White River Entrance",
     approach: "From Enumclaw via WA-410",
-    min: 10,
-    median: 15,
-    max: 20,
-    queueMiles: 0.7,
-    trend: "Stable",
-    confidence: "Low",
-    confidenceScore: 40,
+    min: null,
+    median: null,
+    max: null,
+    queueMiles: null,
+    trend: "Unavailable",
+    confidence: "Unavailable",
+    confidenceScore: 0,
     reports: 0,
-    updatedMinutes: 0,
-    status: "moderate",
-    statusLabel: "Moderate delay",
-    dataMode: "browser-fallback"
+    updatedMinutes: null,
+    status: "unavailable",
+    statusLabel: "Estimate unavailable",
+    dataMode: "unavailable",
+    displayable: false,
+    freshnessStatus: "unavailable"
   }
 };
 
 const fallbackAlerts = [
   {
-    tag: "STATIC FALLBACK",
-    title: "The backend is not running",
-    detail: "Start server.py to use persistent observations, API forecasts, and saved visitor timers."
-  },
-  {
-    tag: "DATA QUALITY",
-    title: "Displayed waits are illustrative",
-    detail: "Do not use these fallback values as current park conditions."
+    tag: "SERVICE STATUS",
+    title: "Current condition feed unavailable",
+    detail: "Wait estimates are hidden until the site can retrieve a recent traffic observation. Check official NPS conditions before travel."
   }
 ];
 
 const fallbackForecasts = {
-  "nisqually": [
+  nisqually: [
     [6, 0, 5], [7, 0, 8], [8, 5, 15], [9, 10, 25], [10, 25, 45], [11, 40, 65],
     [12, 45, 75], [13, 45, 70], [14, 35, 60], [15, 25, 45], [16, 15, 30], [17, 5, 18]
   ],
@@ -59,12 +58,13 @@ const fallbackForecasts = {
   ]
 };
 
-let entrances = structuredClone(fallbackEntrances);
+let entrances = structuredClone(unavailableEntrances);
 let operationalAlerts = fallbackAlerts;
-let systemMode = "browser-fallback";
+let systemMode = "unavailable";
 let timerInterval = null;
 let timerStartedAt = null;
 let activeReportId = null;
+let activeReportToken = null;
 let activeReportMode = "local";
 
 async function apiFetch(path, options = {}) {
@@ -87,64 +87,114 @@ async function apiFetch(path, options = {}) {
   return payload;
 }
 
+function isDisplayable(entrance) {
+  return Boolean(
+    entrance
+    && entrance.displayable !== false
+    && Number.isFinite(entrance.min)
+    && Number.isFinite(entrance.max)
+  );
+}
+
 function waitLabel(entrance) {
+  if (entrance?.entranceClosed || entrance?.freshnessStatus === "closed") return "Closed";
+  if (!isDisplayable(entrance)) return "Unavailable";
   return entrance.min === 0 && entrance.max <= 10
     ? "Under 10"
     : `${entrance.min}–${entrance.max}`;
 }
 
-function freshnessLabel(minutes) {
-  if (minutes === null || minutes === undefined) return "No observation";
+function freshnessLabel(entrance) {
+  if (entrance.freshnessStatus === "closed") return "Manual closure override";
+  const minutes = entrance.updatedMinutes;
+  if (entrance.freshnessStatus === "unavailable" || minutes === null || minutes === undefined) {
+    return "No recent observation";
+  }
+  if (entrance.freshnessStatus === "last-daytime") {
+    return minutes <= 0 ? "Last daytime observation" : `Last daytime observation · ${minutes} min ago`;
+  }
+  if (entrance.freshnessStatus === "stale") {
+    return `Stale · ${minutes} min ago`;
+  }
   if (minutes <= 0) return "Just now";
   return `${minutes} min ago`;
 }
 
-function queueLabel(entrance) {
-  if (entrance.queueMiles === null || entrance.queueMiles === undefined) {
-    return "Queue length not yet available";
+function sourceLabel(entrance) {
+  if (entrance.entranceClosed || entrance.freshnessStatus === "closed") {
+    return "This entrance is marked closed; verify current status with the National Park Service.";
   }
-  if (entrance.queueMiles <= 0) return "No sustained approach queue detected";
-  return `Approximate delay footprint: ${Number(entrance.queueMiles).toFixed(1)} miles`;
+  if (!isDisplayable(entrance)) {
+    return "A recent traffic observation is required before an estimate is shown.";
+  }
+  if (entrance.freshnessStatus === "stale") {
+    return "This estimate is aging and may no longer reflect the entrance line.";
+  }
+  if (entrance.freshnessStatus === "last-daytime") {
+    return "Daytime polling has ended; this is the last recent observation, not a live reading.";
+  }
+  return "Approach traffic delay; physical queue length is not measured in this beta.";
 }
 
 function renderEntranceCards() {
   const container = document.querySelector("#entrance-cards");
-  container.innerHTML = Object.values(entrances).map((entrance) => `
-    <article class="entrance-card ${entrance.status}">
-      <div class="card-top">
-        <div>
-          <h3>${escapeHtml(entrance.name)}</h3>
-          <p>${escapeHtml(entrance.approach)}</p>
+  container.innerHTML = Object.values(entrances).map((entrance) => {
+    const displayable = isDisplayable(entrance);
+    const waitMarkup = displayable
+      ? `<strong>${waitLabel(entrance)}</strong><span>minutes</span>`
+      : entrance.entranceClosed || entrance.freshnessStatus === "closed"
+        ? `<strong>Closed</strong><span>estimate suppressed</span>`
+        : `<strong>Unavailable</strong><span>no current estimate</span>`;
+    const freshnessClass = ["stale", "last-daytime"].includes(entrance.freshnessStatus)
+      ? " freshness-warning"
+      : "";
+    return `
+      <article class="entrance-card ${escapeHtml(entrance.status || "unavailable")}">
+        <div class="card-top">
+          <div>
+            <h3>${escapeHtml(entrance.name)}</h3>
+            <p>${escapeHtml(entrance.approach)}</p>
+          </div>
+          <span class="status-pill ${escapeHtml(entrance.status || "unavailable")}">${escapeHtml(entrance.statusLabel || "Estimate unavailable")}</span>
         </div>
-        <span class="status-pill ${entrance.status}">${escapeHtml(entrance.statusLabel)}</span>
-      </div>
-      <div class="wait-number">
-        <strong>${waitLabel(entrance)}</strong>
-        <span>minutes</span>
-      </div>
-      <p class="queue-detail">${escapeHtml(queueLabel(entrance))}</p>
-      <div class="metric-row">
-        <div><span>Trend</span><strong>${escapeHtml(entrance.trend)}</strong></div>
-        <div><span>Confidence</span><strong>${escapeHtml(entrance.confidence)}${Number.isFinite(entrance.confidenceScore) ? ` · ${entrance.confidenceScore}` : ""}</strong></div>
-        <div><span>Recent reports</span><strong>${entrance.reports}</strong></div>
-        <div><span>Updated</span><strong>${freshnessLabel(entrance.updatedMinutes)}</strong></div>
-      </div>
-    </article>
-  `).join("");
+        <div class="wait-number ${displayable ? "" : "unavailable-wait"}">${waitMarkup}</div>
+        <p class="queue-detail${freshnessClass}">${escapeHtml(sourceLabel(entrance))}</p>
+        <div class="metric-row">
+          <div><span>Trend</span><strong>${escapeHtml(displayable ? entrance.trend : "Unavailable")}</strong></div>
+          <div><span>Confidence</span><strong>${escapeHtml(displayable ? entrance.confidence : "Unavailable")}${displayable && Number.isFinite(entrance.confidenceScore) ? ` · ${entrance.confidenceScore}` : ""}</strong></div>
+          <div><span>Community reports</span><strong>${Number(entrance.reports) || 0}</strong></div>
+          <div><span>Observation</span><strong>${escapeHtml(freshnessLabel(entrance))}</strong></div>
+        </div>
+      </article>
+    `;
+  }).join("");
 
-  document.querySelector("#map-nisqually").textContent = `${waitLabel(entrances.nisqually)} min`;
-  document.querySelector("#map-white-river").textContent = `${waitLabel(entrances["white-river"])} min`;
   for (const entranceId of ["nisqually", "white-river"]) {
+    const entrance = entrances[entranceId] || unavailableEntrances[entranceId];
+    const mapLabel = document.querySelector(`#map-${entranceId}`);
+    if (mapLabel) {
+      mapLabel.textContent = isDisplayable(entrance)
+        ? `${waitLabel(entrance)} min`
+        : entrance.entranceClosed || entrance.freshnessStatus === "closed"
+          ? "Closed"
+          : "Unavailable";
+    }
     const line = document.querySelector(`#${entranceId}-queue-line`);
-    if (line) line.setAttribute("class", `queue-line ${entrances[entranceId].status}`);
+    if (line) line.setAttribute("class", `queue-line ${entrance.status || "unavailable"}`);
   }
 
   const values = Object.values(entrances);
-  const longest = [...values].sort((a, b) => b.max - a.max)[0];
-  const best = [...values].sort((a, b) => a.max - b.max)[0];
-  document.querySelector("#longest-wait").textContent = `${waitLabel(longest)} min`;
-  document.querySelector("#best-entrance").textContent = best.name.replace(" Entrance", "");
-  document.querySelector("#report-coverage").textContent = `${values.filter((entry) => entry.reports > 0).length} of ${values.length}`;
+  const available = values.filter(isDisplayable);
+  if (available.length) {
+    const longest = [...available].sort((a, b) => b.max - a.max)[0];
+    const best = [...available].sort((a, b) => a.max - b.max)[0];
+    document.querySelector("#longest-wait").textContent = `${waitLabel(longest)} min`;
+    document.querySelector("#best-entrance").textContent = best.name.replace(" Entrance", "");
+  } else {
+    document.querySelector("#longest-wait").textContent = "Unavailable";
+    document.querySelector("#best-entrance").textContent = "Unavailable";
+  }
+  document.querySelector("#report-coverage").textContent = `${values.filter((entry) => Number(entry.reports) > 0).length} of ${values.length}`;
 }
 
 function renderAlerts() {
@@ -166,18 +216,25 @@ function renderAlerts() {
 function setMode(mode, generatedAt = null) {
   systemMode = mode;
   const badge = document.querySelector("#data-mode-badge");
-  badge.className = `data-mode-badge ${mode === "live" ? "live" : mode === "mixed" ? "mixed" : "demo"}`;
-  badge.textContent = mode === "live" ? "Live traffic mode" : mode === "mixed" ? "Mixed data mode" : mode === "browser-fallback" ? "Static fallback" : "Demo traffic mode";
+  const visualMode = mode === "live" ? "live" : mode === "mixed" ? "mixed" : mode === "unavailable" ? "unavailable" : "demo";
+  badge.className = `data-mode-badge ${visualMode}`;
+  badge.textContent = mode === "live"
+    ? "Live traffic data"
+    : mode === "mixed"
+      ? "Mixed data availability"
+      : mode === "demo"
+        ? "Synthetic local demo"
+        : "Estimates unavailable";
 
   const timestamp = generatedAt ? new Date(generatedAt) : new Date();
   const formatted = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(timestamp);
   document.querySelector("#last-updated").textContent = mode === "live"
-    ? `Live estimates generated at ${formatted}`
+    ? `Estimate response generated at ${formatted}`
     : mode === "mixed"
-      ? `Mixed-source estimates generated at ${formatted}`
+      ? `Some entrance data unavailable · checked at ${formatted}`
       : mode === "demo"
-        ? `Synthetic observations generated at ${formatted}`
-        : `Static fallback loaded at ${formatted}`;
+        ? `Synthetic local observations generated at ${formatted}`
+        : `No recent public estimate · checked at ${formatted}`;
 }
 
 async function loadCurrentData() {
@@ -186,9 +243,9 @@ async function loadCurrentData() {
     entrances = Object.fromEntries(payload.entrances.map((entry) => [entry.id, entry]));
     setMode(payload.dataMode, payload.generatedAt);
   } catch (error) {
-    console.warn("Using browser fallback:", error);
-    entrances = structuredClone(fallbackEntrances);
-    setMode("browser-fallback");
+    console.warn("Current wait API unavailable:", error);
+    entrances = structuredClone(unavailableEntrances);
+    setMode("unavailable");
   }
   renderEntranceCards();
 }
@@ -198,7 +255,7 @@ async function loadConditions() {
     const payload = await apiFetch("/api/v1/conditions");
     operationalAlerts = payload.alerts || [];
   } catch (error) {
-    console.warn("Using fallback alerts:", error);
+    console.warn("Condition API unavailable:", error);
     operationalAlerts = fallbackAlerts;
   }
   renderAlerts();
@@ -231,9 +288,9 @@ async function loadForecast() {
     forecast = payload.hours;
     caption = payload.notice;
   } catch (error) {
-    console.warn("Using browser forecast template:", error);
+    console.warn("Forecast API unavailable; using clearly labeled local template:", error);
     forecast = fallbackForecast(entranceId, dayType);
-    caption = "Browser fallback forecast. Start server.py for API-delivered planning ranges.";
+    caption = "Experimental seasonal template—not current traffic and not a validated historical prediction.";
   }
   renderForecast(forecast);
   document.querySelector("#forecast-caption").textContent = caption;
@@ -290,8 +347,8 @@ function beginVisualTimer() {
   document.querySelector("#stop-timer").disabled = false;
   document.querySelector("#timer-result").hidden = true;
   document.querySelector("#timer-status").textContent = activeReportMode === "server"
-    ? "Timing your entrance wait. The start time is saved anonymously."
-    : "Timing locally. Start server.py to save an anonymous report.";
+    ? "Timing your entrance wait. A private completion token is stored only in this browser."
+    : "Timing locally. The report service could not be reached, so this timer will not affect estimates.";
   window.clearInterval(timerInterval);
   timerInterval = window.setInterval(() => {
     document.querySelector("#timer-display").textContent = formatElapsed(Date.now() - timerStartedAt);
@@ -302,6 +359,7 @@ async function startTimer() {
   const entrance = document.querySelector("#timer-entrance").value;
   timerStartedAt = Date.now();
   activeReportId = null;
+  activeReportToken = null;
   activeReportMode = "local";
   try {
     const result = await apiFetch("/api/v1/reports/start", {
@@ -309,6 +367,7 @@ async function startTimer() {
       body: JSON.stringify({ entrance })
     });
     activeReportId = result.reportId;
+    activeReportToken = result.reportToken;
     activeReportMode = "server";
   } catch (error) {
     console.warn("Timer will remain local:", error);
@@ -317,6 +376,7 @@ async function startTimer() {
     entrance,
     timerStartedAt,
     activeReportId,
+    activeReportToken,
     activeReportMode
   }));
   beginVisualTimer();
@@ -327,15 +387,15 @@ async function stopTimer() {
   timerInterval = null;
   const durationMs = Date.now() - timerStartedAt;
   const entranceId = document.querySelector("#timer-entrance").value;
-  const entrance = entrances[entranceId] || fallbackEntrances[entranceId];
+  const entrance = entrances[entranceId] || unavailableEntrances[entranceId];
   const resultBox = document.querySelector("#timer-result");
   let saveMessage = "This timer was kept only in your browser.";
 
-  if (activeReportMode === "server" && activeReportId) {
+  if (activeReportMode === "server" && activeReportId && activeReportToken) {
     try {
       const saved = await apiFetch("/api/v1/reports/complete", {
         method: "POST",
-        body: JSON.stringify({ reportId: activeReportId })
+        body: JSON.stringify({ reportId: activeReportId, reportToken: activeReportToken })
       });
       saveMessage = saved.message;
       await loadCurrentData();
@@ -352,6 +412,7 @@ async function stopTimer() {
   document.querySelector("#timer-display").textContent = formatElapsed(durationMs);
   timerStartedAt = null;
   activeReportId = null;
+  activeReportToken = null;
   activeReportMode = "local";
   localStorage.removeItem("rainier-active-timer");
 }
@@ -365,7 +426,11 @@ function restoreTimer() {
     }
     timerStartedAt = stored.timerStartedAt;
     activeReportId = stored.activeReportId;
+    activeReportToken = stored.activeReportToken;
     activeReportMode = stored.activeReportMode || "local";
+    if (activeReportMode === "server" && (!activeReportId || !activeReportToken)) {
+      activeReportMode = "local";
+    }
     document.querySelector("#timer-entrance").value = stored.entrance;
     beginVisualTimer();
   } catch {
@@ -389,6 +454,7 @@ function escapeAttribute(value) {
 
 async function initialize() {
   setDefaultDate();
+  renderEntranceCards();
   await Promise.all([loadCurrentData(), loadConditions()]);
   await loadForecast();
   restoreTimer();

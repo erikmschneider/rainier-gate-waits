@@ -1,25 +1,40 @@
-# Rainier Gate Waits — local MVP
+# Rainier Gate Waits — public beta
 
-A mobile-responsive prototype and runnable local backend for estimating vehicle waits at Mount Rainier National Park entrance gates.
+Rainier Gate Waits is an independent, mobile-responsive public beta for estimating vehicle waits at the Nisqually and White River entrances to Mount Rainier National Park.
 
-The project now works in two modes:
+The Python standard-library service hosts the website and API, polls Google Routes, stores observations and anonymous community timers in SQLite, and suppresses estimates when the underlying data is too old.
 
-- **Transparent demo mode:** runs immediately with synthetic traffic observations clearly labeled as demo data.
-- **Live-feed mode:** polls Google Routes for traffic-aware approach travel times and can retrieve NPS and WSDOT alerts when API credentials are supplied.
+## Public-beta safeguards
+
+- No plausible browser fallback waits are displayed when the API is unavailable.
+- Synthetic traffic is disabled by default and must be explicitly enabled for local demonstrations.
+- Traffic observations up to 30 minutes old are treated as current.
+- Observations 31–60 minutes old are visibly labeled stale or last daytime observations.
+- Estimates older than 60 minutes are hidden.
+- Community timers supplement a recent Google observation but never create an estimate by themselves.
+- One recent report per anonymous client contributes to the estimator.
+- Community report weight is capped at 30% for one or two distinct reports and 50% for three or more.
+- Timer completion uses a random browser-held token instead of depending on an unchanged IP address.
+- Report locations are ignored by default until an explicit location-verification feature is enabled.
+- A manual `CLOSED_ENTRANCES` override suppresses estimates for a closed or seasonally inaccessible entrance.
+- Application request logs use short salted client identifiers rather than raw IP addresses.
+- Abandoned timers are deleted after approximately 24 hours; report identifiers are removed after approximately 60 days.
+- Rotating SQLite backups are created approximately daily and retained on the persistent disk.
 
 ## What is included
 
-- Current-wait cards for Nisqually and White River
-- SQLite persistence for traffic snapshots, estimates, conditions, and visitor wait reports
+- Current estimate cards for Nisqually and White River
+- Fresh, stale, last-daytime, and unavailable states
+- SQLite persistence for traffic observations, estimates, conditions, and community reports
 - Background polling every 15 minutes from 6:00 a.m. through 7:59 p.m. Pacific by default
-- Browser timer connected to anonymous report start/complete API endpoints
-- Hourly planning forecasts served by the backend
-- Current estimate, history, conditions, health, forecast, and reporting endpoints
-- Static fallback behavior when `index.html` is opened without the backend
+- Anonymous browser timer with reload and network-change resilience
+- Preliminary seasonal planning templates, clearly labeled as experimental
+- Health endpoint with per-entrance freshness, database writability, disk space, poll errors, report volume, and backup status
+- Privacy notice and links to official NPS conditions and road status
 - Automated Python tests
 - No third-party Python packages
 
-## Start the MVP
+## Run locally
 
 Python 3.11 or newer is recommended.
 
@@ -28,103 +43,68 @@ cd rainier-gate-waits-starter
 python3 server.py
 ```
 
-On Windows PowerShell, this will often be:
-
-```powershell
-cd rainier-gate-waits-starter
-py server.py
-```
-
-Alternatively, double-click `start_windows.bat` on Windows or run `./start_mac_linux.sh` on macOS/Linux.
-
 Then open:
 
 ```text
 http://127.0.0.1:8000
 ```
 
-The first run creates `rainier_waits.sqlite3`. The database is ignored by Git.
-
-## Publish as one public service
-
-The project includes `render.yaml`, which deploys the site, API, background poller, and persistent SQLite database as one Render web service. See `PUBLIC_DEPLOYMENT.md` for the full process.
-
-The public pilot uses only Nisqually and White River, with 15-minute polling from 6:00 a.m. through 7:59 p.m. Pacific. This is approximately 3,360 Google route requests in a 30-day month.
-
-## Run with Docker
+Without a Google Routes key, current waits remain unavailable. To run an explicitly labeled local synthetic demonstration:
 
 ```bash
-docker compose up --build
+export ALLOW_SYNTHETIC_DATA=true
+python3 server.py
 ```
 
-The Compose configuration persists SQLite data in a named volume and passes optional API credentials from your shell environment.
+Do not enable synthetic data on the public deployment.
 
-## Run the tests
+To manually suppress a closed entrance, set a comma-separated override such as:
 
 ```bash
-python3 -m unittest discover -s tests -v
+export CLOSED_ENTRANCES="white-river"
 ```
 
 ## Activate live traffic measurements
-
-Google Routes is the core live signal. Set an API key in the environment before starting the server.
-
-macOS or Linux:
 
 ```bash
 export GOOGLE_ROUTES_API_KEY="your-key"
 python3 server.py
 ```
 
-Windows PowerShell:
+The API key remains on the server. The Google request asks only for traffic-adjusted duration, static duration, and distance.
 
-```powershell
-$env:GOOGLE_ROUTES_API_KEY="your-key"
-py server.py
-```
+Before broad promotion, field-test the approach origin and destination coordinates in `server.py`. They remain preliminary and are not survey-grade queue points.
 
-The server requests traffic-aware and traffic-free durations for each fixed approach segment. API keys remain on the server and are never sent to `app.js`.
-
-Before public deployment, verify every approach origin and gate destination in `server.py`. The included coordinates are starter route definitions, not survey-grade entrance or queue points.
-
-## Connect official condition feeds
-
-Optional environment variables:
+## Optional condition feeds
 
 ```text
 NPS_API_KEY=...
 WSDOT_ACCESS_CODE=...
 ```
 
-The NPS API provides authoritative park alerts, but its alert feed may lag the park website. The WSDOT integration filters statewide alerts for SR 706 and SR 410.
+The public interface also links directly to official NPS alerts and road status even when these optional APIs are not configured.
 
-See `.env.example` for all settings. The standard-library server does not automatically load `.env`; set the variables in your shell or use your hosting platform’s environment settings.
+## Deploy on Render
+
+The included `render.yaml` creates one Docker web service and a 1 GB persistent disk. See `PUBLIC_DEPLOYMENT.md` for the deployment and validation checklist.
+
+## Tests
+
+```bash
+python3 -m unittest discover -s tests -v
+```
 
 ## Important files
 
-- `index.html`, `styles.css`, `app.js` — public website
-- `server.py` — static server, API, polling, estimator, and SQLite persistence
+- `index.html`, `styles.css`, `app.js` — public interface
+- `privacy.html` — public privacy notice
+- `server.py` — API, polling, estimator, health monitoring, retention, backups, and SQLite persistence
 - `API.md` — endpoint contract
-- `ARCHITECTURE.md` — production architecture and development sequence
-- `DEPLOYMENT.md` — deployment and operational checklist
-- `schema.sql` — future PostgreSQL/PostGIS production schema
+- `PUBLIC_DEPLOYMENT.md` — Render deployment and beta checklist
 - `tests/test_server.py` — backend tests
 
-## Current methodological status
+## Methodological status
 
-The backend estimator is deliberately simple:
+The current estimate is a heuristic range based primarily on Google’s added travel time on a fixed approach segment. Recent community timers receive limited, recency-weighted influence. Physical queue length is not shown because it has not yet been measured reliably.
 
-1. Calculate traffic delay as traffic-aware duration minus traffic-free duration.
-2. Blend that delay with recent qualifying visitor timers.
-3. Widen the displayed range when observations are stale or visitor reports disagree.
-4. Calculate a confidence score from feed freshness, report volume, agreement, and history.
-
-The planning forecast is still a seasonal template. It should not be described as predictive until enough verified wait reports and archived traffic snapshots are available for back-testing.
-
-## Public-use cautions
-
-- The application is independent and is not an official NPS source.
-- Demo values must remain visibly labeled.
-- Live traffic delay can include construction, incidents, or slow-moving vehicles unrelated to the entrance booth.
-- The displayed queue mileage is currently a coarse delay proxy. It should eventually be replaced with a detected or reported queue-start location.
-- Seasonal entrance closure logic must be strengthened before public launch.
+The planning chart is a preliminary seasonal template. It is not a prediction from current traffic and has not yet been validated against a sufficient historical dataset.

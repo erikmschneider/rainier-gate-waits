@@ -15,6 +15,12 @@ services:
         value: /data/rainier_waits.sqlite3
       - key: ENABLE_BACKGROUND_POLLING
         value: true
+      - key: ALLOW_SYNTHETIC_DATA
+        value: false
+      - key: ACCEPT_REPORT_LOCATIONS
+        value: false
+      - key: CLOSED_ENTRANCES
+        value: ""
       - key: POLL_INTERVAL_SECONDS
         value: 900
       - key: POLL_START_HOUR_LOCAL
@@ -23,6 +29,20 @@ services:
         value: 20
       - key: TRUST_PROXY_HEADERS
         value: true
+      - key: CURRENT_MAX_AGE_MINUTES
+        value: 30
+      - key: STALE_MAX_AGE_MINUTES
+        value: 60
+      - key: ABANDONED_REPORT_RETENTION_HOURS
+        value: 24
+      - key: REPORT_IDENTIFIER_RETENTION_DAYS
+        value: 60
+      - key: RAINIER_BACKUP_DIR
+        value: /data/backups
+      - key: BACKUP_INTERVAL_HOURS
+        value: 24
+      - key: BACKUP_RETENTION_COUNT
+        value: 7
       - key: RAINIER_HASH_SECRET
         generateValue: true
       - key: RAINIER_ADMIN_TOKEN

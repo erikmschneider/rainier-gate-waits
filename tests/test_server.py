@@ -6,7 +6,7 @@ import tempfile
 import unittest
 import urllib.error
 from unittest import mock
-from datetime import datetime, timezone
+from datetime import timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +25,13 @@ class ServerTests(unittest.TestCase):
     def setUpClass(cls):
         server.initialize_database()
 
+    def setUp(self):
+        with server.database() as conn:
+            conn.execute("delete from wait_estimates")
+            conn.execute("delete from wait_reports")
+            conn.execute("delete from traffic_snapshots")
+            conn.execute("delete from condition_events")
+
     def test_google_duration_parser(self):
         self.assertEqual(server.parse_google_duration("3.5s"), 4)
         self.assertEqual(server.parse_google_duration("120s"), 120)
@@ -38,14 +45,52 @@ class ServerTests(unittest.TestCase):
         self.assertGreater(result["hours"][6]["high"], result["hours"][0]["high"])
 
     def test_demo_poll_produces_current_estimates(self):
-        server.seed_demo_snapshots()
-        payload = server.current_payload()
+        with mock.patch.object(server, "ALLOW_SYNTHETIC_DATA", True):
+            server.seed_demo_snapshots()
+            payload = server.current_payload()
         self.assertEqual(len(payload["entrances"]), 2)
         self.assertEqual({item["id"] for item in payload["entrances"]}, {"nisqually", "white-river"})
         self.assertEqual(payload["dataMode"], "demo")
         for entrance in payload["entrances"]:
             self.assertLessEqual(entrance["min"], entrance["max"])
             self.assertIn(entrance["status"], {"clear", "moderate", "severe"})
+
+    def test_public_payload_hides_estimates_without_recent_traffic(self):
+        payload = server.current_payload()
+        self.assertEqual(payload["dataMode"], "unavailable")
+        for entrance in payload["entrances"]:
+            self.assertFalse(entrance["displayable"])
+            self.assertIsNone(entrance["min"])
+            self.assertEqual(entrance["status"], "unavailable")
+
+    def test_stale_observation_is_suppressed_after_display_cutoff(self):
+        observed_at = server.utc_now() - timedelta(minutes=server.STALE_MAX_AGE_MINUTES + 1)
+        server.store_traffic_snapshot(
+            "nisqually", observed_at, 1800, 600, 5000, "google-routes", {"test": True}
+        )
+        item = next(entry for entry in server.current_payload()["entrances"] if entry["id"] == "nisqually")
+        self.assertFalse(item["displayable"])
+        self.assertIsNone(item["max"])
+
+    def test_manual_closure_suppresses_estimate(self):
+        server.store_traffic_snapshot(
+            "white-river", server.utc_now(), 1800, 600, 5000, "google-routes", {"test": True}
+        )
+        with mock.patch.object(server, "CLOSED_ENTRANCES", {"white-river"}):
+            item = next(entry for entry in server.current_payload()["entrances"] if entry["id"] == "white-river")
+        self.assertTrue(item["entranceClosed"])
+        self.assertFalse(item["displayable"])
+        self.assertEqual(item["status"], "closed")
+
+    def test_report_locations_are_ignored_by_default(self):
+        started = server.start_report(
+            {"entrance": "nisqually", "latitude": 46.75, "longitude": -121.92, "accuracyMeters": 5},
+            "test-client",
+        )
+        with server.database() as conn:
+            report = conn.execute("select * from wait_reports where id=?", (started["reportId"],)).fetchone()
+        self.assertIsNone(report["queue_entry_lat"])
+        self.assertIsNone(report["queue_entry_lng"])
 
     def test_http_error_body_is_logged_without_exposing_api_key(self):
         api_key = "AIza" + "A" * 35
@@ -115,9 +160,24 @@ class ServerTests(unittest.TestCase):
     def test_report_round_trip(self):
         client = "test-client"
         started = server.start_report({"entrance": "nisqually"}, client)
-        result = server.complete_report({"reportId": started["reportId"]}, client)
+        result = server.complete_report(
+            {"reportId": started["reportId"], "reportToken": started["reportToken"]},
+            "different-network-client",
+        )
         self.assertEqual(result["entrance"], "nisqually")
         self.assertGreaterEqual(result["waitSeconds"], 1)
+
+    def test_report_completion_rejects_missing_token(self):
+        started = server.start_report({"entrance": "nisqually"}, "test-client")
+        with self.assertRaises(PermissionError):
+            server.complete_report({"reportId": started["reportId"]}, "test-client")
+
+    def test_health_payload_includes_freshness_and_storage_checks(self):
+        payload = server.health_payload()
+        self.assertTrue(payload["databaseWritable"])
+        self.assertIn("nisqually", payload["entrances"])
+        self.assertIn("diskFreeMegabytes", payload)
+        self.assertTrue(payload["requestLogsUseHashedClientIdentifiers"])
 
 
 if __name__ == "__main__":

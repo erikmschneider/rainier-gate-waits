@@ -21,7 +21,7 @@
         </span>
         <span>
           <strong>Rainier Gate Waits</strong>
-          <small>Experimental entrance estimates</small>
+          <small>Independent public beta</small>
         </span>
       </a>
       <nav aria-label="Primary navigation">
@@ -29,6 +29,7 @@
         <a href="#plan">Plan a visit</a>
         <a href="#report">Report a wait</a>
         <a href="#method">How it works</a>
+        <a href="privacy.html">Privacy</a>
       </nav>
     </div>
   </header>
@@ -39,28 +40,29 @@
         <div>
           <p class="eyebrow">Mount Rainier National Park</p>
           <h1>Know the line before you reach the gate.</h1>
-          <p class="hero-copy">Live entrance-delay estimates, hourly forecasts, and verified visitor reports for the park’s busiest approaches.</p>
+          <p class="hero-copy">Experimental entrance-delay estimates, planning patterns, and community-submitted wait timers for two major approaches.</p>
           <div class="hero-actions">
             <a class="button primary" href="#current">See current waits</a>
             <a class="button secondary" href="#report">Start a wait timer</a>
           </div>
-          <p class="status-line"><span class="live-dot" aria-hidden="true"></span><span id="last-updated">Loading estimates…</span><span id="data-mode-badge" class="data-mode-badge demo">Checking data mode</span></p>
+          <p class="beta-notice"><strong>Public beta:</strong> estimates may be inaccurate or unavailable. Always verify closures, road status, and operating hours with the National Park Service.</p>
+          <p class="status-line"><span class="live-dot" aria-hidden="true"></span><span id="last-updated">Checking for recent observations…</span><span id="data-mode-badge" class="data-mode-badge unavailable">Checking data availability</span></p>
         </div>
 
         <aside class="hero-summary" aria-label="Current system summary">
           <div class="summary-item">
             <span>Longest current wait</span>
-            <strong id="longest-wait">35–50 min</strong>
+            <strong id="longest-wait">Unavailable</strong>
           </div>
           <div class="summary-item">
             <span>Best major entrance now</span>
-            <strong id="best-entrance">White River</strong>
+            <strong id="best-entrance">Unavailable</strong>
           </div>
           <div class="summary-item">
             <span>Estimates with recent reports</span>
             <strong id="report-coverage">0 of 2</strong>
           </div>
-          <p class="experimental-note">Prototype only. Do not use as an official park information source.</p>
+          <p class="experimental-note">Independent and unofficial. Values older than 60 minutes are automatically hidden.</p>
         </aside>
       </div>
     </section>
@@ -70,7 +72,7 @@
         <div class="section-heading">
           <div>
             <p class="eyebrow">Right now</p>
-            <h2>Current entrance waits</h2>
+            <h2>Recent entrance estimates</h2>
           </div>
           <div class="legend" aria-label="Confidence legend">
             <span><i class="confidence high"></i>High confidence</span>
@@ -87,7 +89,7 @@
               <p class="eyebrow">Approach overview</p>
               <h3>Entrance conditions map</h3>
             </div>
-            <p>Illustrative schematic for the prototype</p>
+            <p>Illustrative schematic—not a measured queue map</p>
           </div>
 
           <div class="map-layout">
@@ -114,12 +116,12 @@
                 <g class="gate-marker" transform="translate(210 323)">
                   <circle r="10" />
                   <text x="18" y="-8">Nisqually</text>
-                  <text id="map-nisqually" x="18" y="12" class="map-wait">35–50 min</text>
+                  <text id="map-nisqually" x="18" y="12" class="map-wait">Unavailable</text>
                 </g>
                 <g class="gate-marker" transform="translate(551 149)">
                   <circle r="10" />
                   <text x="-18" y="-10" text-anchor="end">White River</text>
-                  <text id="map-white-river" x="-18" y="12" text-anchor="end" class="map-wait">10–20 min</text>
+                  <text id="map-white-river" x="-18" y="12" text-anchor="end" class="map-wait">Unavailable</text>
                 </g>
 
                 <text x="25" y="395" class="road-label">WA-706 / Ashford</text>
@@ -130,7 +132,8 @@
             <aside class="conditions-panel">
               <h4>Operational notes</h4>
               <div id="alerts-list"></div>
-              <a class="text-link" href="#method">See data sources and limitations →</a>
+              <a class="text-link" href="https://www.nps.gov/mora/planyourvisit/conditions.htm" target="_blank" rel="noopener noreferrer">Official NPS alerts and conditions ↗</a>
+              <a class="text-link secondary-link" href="https://www.nps.gov/mora/planyourvisit/road-status.htm" target="_blank" rel="noopener noreferrer">Official road status ↗</a>
             </aside>
           </div>
         </div>
@@ -141,10 +144,10 @@
       <div class="shell">
         <div class="section-heading compact">
           <div>
-            <p class="eyebrow">Before you leave</p>
-            <h2>Plan a lower-wait arrival</h2>
+            <p class="eyebrow">Preliminary planning pattern</p>
+            <h2>Experimental typical wait pattern</h2>
           </div>
-          <p class="section-intro">Choose an entrance and day to compare estimated waits throughout the day.</p>
+          <p class="section-intro">Choose an entrance and day type to view a preliminary seasonal template. It is not based on current traffic.</p>
         </div>
 
         <div class="planner">
@@ -193,10 +196,10 @@
         <div>
           <p class="eyebrow">Improve the estimate</p>
           <h2>Report your gate wait</h2>
-          <p>Start the timer when you reach the back of the entrance line. Stop it after completing the gate transaction. In a production version, geolocation could suggest both steps while retaining only an anonymized wait record.</p>
+          <p>Start the timer when you reach the back of the entrance line. Stop it after completing the gate transaction. Reports are anonymous community submissions and are not yet location-verified.</p>
           <div class="privacy-note">
             <strong>Privacy-first default</strong>
-            <span>Store the entrance, start time, duration, and broad queue position—not a visitor’s full route.</span>
+            <span>The beta stores the entrance, timestamps, duration, and an anonymous abuse-prevention identifier—not a visitor’s route. <a href="privacy.html">Read the privacy notice.</a></span>
           </div>
         </div>
 
@@ -237,8 +240,8 @@
           </article>
           <article>
             <span class="step-number">02</span>
-            <h3>Verify with visitor timers</h3>
-            <p>Use recent completed waits to calibrate the traffic signal and identify the actual back of the queue.</p>
+            <h3>Supplement with community timers</h3>
+            <p>Use recent completed waits as a limited supplement to the traffic signal. Community reports never create an estimate by themselves.</p>
           </article>
           <article>
             <span class="step-number">03</span>
@@ -247,13 +250,13 @@
           </article>
           <article>
             <span class="step-number">04</span>
-            <h3>Forecast comparable days</h3>
-            <p>Blend recent conditions with historical waits for the same entrance, season, weekday, hour, and weather pattern.</p>
+            <h3>Build a validated history</h3>
+            <p>Collect field observations before replacing the preliminary seasonal templates with a calibrated historical model.</p>
           </article>
         </div>
 
         <div class="source-strip">
-          <span>Potential production inputs</span>
+          <span>Current and planned inputs</span>
           <ul>
             <li>Traffic-routing API</li>
             <li>Visitor wait timers</li>
@@ -270,9 +273,9 @@
     <div class="shell footer-inner">
       <div>
         <strong>Rainier Gate Waits</strong>
-        <p>Independent experimental concept. Not affiliated with or endorsed by the National Park Service.</p>
+        <p>Independent public beta. Not affiliated with or endorsed by the National Park Service.</p>
       </div>
-      <p>Local MVP · Live-feed ready</p>
+      <p><a href="privacy.html">Privacy</a> · <a href="/api/v1/health">System health</a></p>
     </div>
   </footer>
 

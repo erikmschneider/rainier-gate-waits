@@ -22,6 +22,10 @@ Recommended optional configuration:
 - `POLL_START_HOUR_LOCAL=6`
 - `POLL_END_HOUR_LOCAL=20`
 - `RAINIER_HOST=0.0.0.0`
+- `ALLOW_SYNTHETIC_DATA=false`
+- `CURRENT_MAX_AGE_MINUTES=30`
+- `STALE_MAX_AGE_MINUTES=60`
+- `RAINIER_BACKUP_DIR=/data/backups`
 
 ## Traffic-provider controls
 
@@ -42,12 +46,14 @@ The MVP already:
 - Rounds optional coordinates
 - Limits report starts to five per anonymous client per hour
 - Excludes very short timers from the public estimate
+- Uses a private timer-completion token instead of requiring an unchanged IP address
+- Deduplicates recent estimator input by anonymous client
+- Publishes a privacy notice and retention schedule
+- Deletes abandoned timers and removes old client/token identifiers automatically
+- Uses hashed client identifiers in application request logs
 
-Before a public pilot, add:
+Still recommended before a broader public launch:
 
-- A published privacy notice and retention schedule
-- Automatic deletion of raw or precise location-derived data
-- CSRF protection for report endpoints
 - Reverse-proxy request limits
 - Stronger duplicate and impossible-travel detection
 - An administrative review interface
@@ -55,9 +61,9 @@ Before a public pilot, add:
 ## Reliability controls
 
 - Run the server behind a process supervisor.
-- Add database backups.
+- Verify the built-in rotating database backups on the persistent disk.
 - Monitor `/api/v1/health`.
-- Alert when no traffic snapshot has arrived for more than two polling intervals.
+- Add an external alert when health reports degraded data or repeated polling failures.
 - Record API latency, failures, quota errors, and estimate freshness.
 - Suppress or clearly downgrade estimates when an entrance is closed.
 

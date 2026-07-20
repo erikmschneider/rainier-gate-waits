@@ -1,4 +1,4 @@
-# MVP API contract
+# Public beta API contract
 
 All endpoints are served from the same origin as the website. JSON responses use `Cache-Control: no-store`.
 
@@ -6,42 +6,44 @@ All endpoints are served from the same origin as the website. JSON responses use
 
 ### `GET /api/v1/health`
 
-Returns database and integration status.
+Returns process, storage, polling, backup, and per-entrance data freshness information. Important fields include:
 
-```json
-{
-  "status": "ok",
-  "time": "2026-07-17T18:00:00Z",
-  "googleRoutesConfigured": false,
-  "npsConfigured": false,
-  "wsdotConfigured": false,
-  "pollIntervalSeconds": 900,
-  "pollingWindowLocal": {"startHour": 6, "endHour": 20},
-  "pollingActiveNow": true
-}
-```
+- `status` — `ok`, `degraded`, or `error`
+- `databaseWritable`
+- `diskFreeMegabytes`
+- `pollingActiveNow`
+- `entrances.<slug>.freshness` — `current`, `stale`, or `unavailable`
+- `poller.consecutiveFailedCycles`
+- `poller.lastErrors`
+- `completedReportsLast24Hours`
+- `lastBackupAt`
+
+An internal database failure returns HTTP 503. Stale traffic during polling hours returns `status: degraded` with HTTP 200 so the service remains reachable while external monitoring can inspect the JSON state.
 
 ## Current entrance estimates
 
 ### `GET /api/v1/entrances/current`
 
-Returns estimates for the two pilot entrances—Nisqually and White River—and the basis for each estimate.
+Returns Nisqually and White River. Important fields:
 
-Important fields:
-
-- `min`, `median`, `max` — displayed wait range in minutes
-- `queueMiles` — coarse delay-footprint proxy in the MVP
+- `min`, `median`, `max` — wait range in minutes, or `null` when unavailable
+- `displayable` — whether a public estimate may be shown
+- `freshnessStatus` — `current`, `stale`, `last-daytime`, or `unavailable`
+- `updatedMinutes`
 - `confidenceScore` — 0–100
-- `dataMode` — `live`, `live+reports`, `demo`, or `demo+reports`
-- `basis` — traffic age, provider, raw delay, and report summary
+- `reports` — distinct recent community reports considered
+- `dataMode` — `live`, `live+reports`, `demo`, `demo+reports`, or `unavailable`
+- `basis` — provider, age, traffic delay, community report summary, and limitations
+
+`queueMiles` is currently always `null`; the beta does not claim a measured physical queue length.
 
 ## Conditions
 
 ### `GET /api/v1/conditions`
 
-Returns active NPS and WSDOT conditions plus setup notices when feeds are not connected.
+Returns active NPS and WSDOT conditions when configured, plus setup or data-availability notices.
 
-## Forecast
+## Planning template
 
 ### `GET /api/v1/entrances/:slug/forecast`
 
@@ -50,15 +52,15 @@ Query parameters:
 - `date=YYYY-MM-DD`
 - `dayType=weekday|weekend|holiday`
 
-The current response is marked `seasonal-template`. A future model should replace it with back-tested quantile forecasts.
+The response is marked `seasonal-template` and must not be presented as a current-traffic or validated historical prediction.
 
 ## History
 
 ### `GET /api/v1/entrances/:slug/history?hours=24`
 
-Returns up to seven days of archived approach observations, including traffic-aware duration, traffic-free duration, delay, and provider.
+Returns up to seven days of archived approach observations.
 
-## Visitor timer
+## Community timer
 
 ### `POST /api/v1/reports/start`
 
@@ -68,28 +70,32 @@ Returns up to seven days of archived approach observations, including traffic-aw
 }
 ```
 
-Optional location fields are supported but the current frontend does not request them:
+Response:
 
 ```json
 {
+  "reportId": "UUID",
+  "reportToken": "private random token",
   "entrance": "nisqually",
-  "latitude": 46.751,
-  "longitude": -121.918,
-  "accuracyMeters": 25
+  "startedAt": "2026-07-20T02:00:00Z"
 }
 ```
 
-Coordinates are rounded to three decimal places before storage.
+The browser must keep `reportToken` private. The server stores only its one-way hash.
+
+Optional rounded location fields are supported by the backend, but the current public interface does not request location permission.
+They are ignored unless `ACCEPT_REPORT_LOCATIONS=true` is explicitly configured.
 
 ### `POST /api/v1/reports/complete`
 
 ```json
 {
-  "reportId": "UUID returned by the start endpoint"
+  "reportId": "UUID returned by start",
+  "reportToken": "private token returned by start"
 }
 ```
 
-Timers shorter than two minutes are stored but assigned low confidence and do not influence public estimates. Timers longer than four hours are rejected.
+The token allows completion after a Wi-Fi/cellular change. Timers shorter than two minutes are retained as low-confidence records and do not influence public estimates. Timers longer than four hours are rejected.
 
 ## Manual poll
 

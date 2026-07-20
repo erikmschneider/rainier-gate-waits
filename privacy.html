@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Privacy notice for the Rainier Gate Waits public beta." />
+  <title>Privacy · Rainier Gate Waits</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+  <header class="site-header">
+    <div class="shell header-inner">
+      <a class="brand" href="index.html" aria-label="Rainier Gate Waits home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 56 44" role="img">
+            <path d="M4 39 20 16l7 8L35 8l17 31H4Z" fill="currentColor" opacity=".28"/>
+            <path d="m4 39 16-23 7 8L35 8l17 31" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <span><strong>Rainier Gate Waits</strong><small>Independent public beta</small></span>
+      </a>
+      <nav aria-label="Primary navigation"><a href="index.html">Back to estimates</a></nav>
+    </div>
+  </header>
+
+  <main class="legal-main" id="main">
+    <div class="shell">
+      <article class="legal-card">
+        <p class="eyebrow">Public beta</p>
+        <h1>Privacy notice</h1>
+        <p class="updated">Last updated July 19, 2026</p>
+        <p>Rainier Gate Waits is designed to collect only the information needed to operate anonymous community wait timers and protect the service from abuse.</p>
+
+        <h2>Information collected for a wait report</h2>
+        <ul>
+          <li>The selected entrance.</li>
+          <li>The timer start and completion timestamps.</li>
+          <li>The resulting wait duration.</li>
+          <li>Optional rounded location coordinates only when a future interface explicitly requests permission.</li>
+          <li>A daily salted identifier derived from request information for rate limiting and duplicate-report control.</li>
+        </ul>
+        <p>The application does not store a visitor’s route, name, email address, or account information. Raw IP addresses are not printed in application request logs. The hosting provider may process ordinary request metadata under its own service terms.</p>
+
+        <h2>Private timer token</h2>
+        <p>When a server-backed timer begins, the browser receives a random completion token. The browser stores that token locally so the timer can still be completed after a network change or page reload. The server stores only a one-way hash of the token.</p>
+
+        <h2>How reports are used</h2>
+        <p>Qualifying community reports may modestly supplement a recent Google traffic-delay observation. Reports do not create a public estimate on their own, and they are not currently location-verified.</p>
+
+        <h2>Retention</h2>
+        <ul>
+          <li>Abandoned timer starts are deleted after approximately 24 hours.</li>
+          <li>Anonymous client identifiers and timer-token hashes are removed from completed reports after approximately 60 days.</li>
+          <li>Aggregate estimates and non-identifying durations may be retained to evaluate and improve the beta.</li>
+        </ul>
+
+        <h2>Official information</h2>
+        <p>This independent beta is not affiliated with or endorsed by the National Park Service. Always check official NPS alerts, road status, and operating hours before traveling.</p>
+
+        <a class="button secondary" href="index.html">Return to Rainier Gate Waits</a>
+      </article>
+    </div>
+  </main>
+
+  <footer>
+    <div class="shell footer-inner">
+      <div><strong>Rainier Gate Waits</strong><p>Independent public beta.</p></div>
+      <p><a href="index.html">Current estimates</a></p>
+    </div>
+  </footer>
+</body>
+</html>

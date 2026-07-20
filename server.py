@@ -18,6 +18,7 @@ import os
 import random
 import re
 import secrets
+import shutil
 import sqlite3
 import statistics
 import threading
@@ -50,6 +51,20 @@ NPS_API_KEY = os.environ.get("NPS_API_KEY", "").strip()
 WSDOT_ACCESS_CODE = os.environ.get("WSDOT_ACCESS_CODE", "").strip()
 ADMIN_TOKEN = os.environ.get("RAINIER_ADMIN_TOKEN", "").strip()
 HASH_SECRET = os.environ.get("RAINIER_HASH_SECRET", secrets.token_hex(16))
+ALLOW_SYNTHETIC_DATA = os.environ.get("ALLOW_SYNTHETIC_DATA", "false").lower() in {"1", "true", "yes"}
+ACCEPT_REPORT_LOCATIONS = os.environ.get("ACCEPT_REPORT_LOCATIONS", "false").lower() in {"1", "true", "yes"}
+CURRENT_MAX_AGE_MINUTES = max(5, int(os.environ.get("CURRENT_MAX_AGE_MINUTES", "30")))
+STALE_MAX_AGE_MINUTES = max(CURRENT_MAX_AGE_MINUTES, int(os.environ.get("STALE_MAX_AGE_MINUTES", "60")))
+ABANDONED_REPORT_RETENTION_HOURS = max(1, int(os.environ.get("ABANDONED_REPORT_RETENTION_HOURS", "24")))
+REPORT_IDENTIFIER_RETENTION_DAYS = max(1, int(os.environ.get("REPORT_IDENTIFIER_RETENTION_DAYS", "60")))
+BACKUP_INTERVAL_HOURS = max(1, int(os.environ.get("BACKUP_INTERVAL_HOURS", "24")))
+BACKUP_RETENTION_COUNT = max(1, int(os.environ.get("BACKUP_RETENTION_COUNT", "7")))
+BACKUP_DIR = Path(os.environ.get("RAINIER_BACKUP_DIR", DB_PATH.parent / "backups"))
+CLOSED_ENTRANCES = {
+    slug.strip().lower()
+    for slug in os.environ.get("CLOSED_ENTRANCES", "").split(",")
+    if slug.strip().lower() in {"nisqually", "white-river"}
+}
 
 UTC = timezone.utc
 PACIFIC = ZoneInfo("America/Los_Angeles")
@@ -143,6 +158,7 @@ create table if not exists wait_reports (
   id text primary key,
   entrance_slug text not null references entrances(slug),
   anonymous_client_hash text,
+  report_secret_hash text,
   started_at text not null,
   completed_at text,
   wait_seconds integer,
@@ -178,14 +194,20 @@ create table if not exists wait_estimates (
 );
 create index if not exists wait_estimates_entrance_time_idx
   on wait_estimates (entrance_slug, estimated_at desc);
+
+create table if not exists service_state (
+  key text primary key,
+  value text,
+  updated_at text not null
+);
 """
 
 
 @dataclass(frozen=True)
 class Estimate:
-    low: int
-    median: int
-    high: int
+    low: int | None
+    median: int | None
+    high: int | None
     queue_distance_miles: float | None
     trend: str
     confidence_score: int
@@ -194,6 +216,15 @@ class Estimate:
     traffic_delay_seconds: int | None
     data_mode: str
     basis: dict[str, Any]
+
+
+POLL_STATE_LOCK = threading.Lock()
+POLL_STATE: dict[str, Any] = {
+    "lastAttemptAt": None,
+    "lastSuccessAt": None,
+    "lastErrors": {},
+    "consecutiveFailedCycles": 0,
+}
 
 
 def utc_now() -> datetime:
@@ -245,6 +276,11 @@ def initialize_database() -> None:
     now = iso()
     with database() as conn:
         conn.executescript(SCHEMA_SQL)
+        wait_report_columns = {
+            row["name"] for row in conn.execute("pragma table_info(wait_reports)").fetchall()
+        }
+        if "report_secret_hash" not in wait_report_columns:
+            conn.execute("alter table wait_reports add column report_secret_hash text")
         conn.execute("update entrances set active=0, updated_at=?", (now,))
         for entry in ENTRANCES.values():
             conn.execute(
@@ -594,7 +630,7 @@ def get_recent_snapshots(conn: sqlite3.Connection, slug: str, minutes: int = 90)
 
 def get_recent_reports(conn: sqlite3.Connection, slug: str, minutes: int = 60) -> list[sqlite3.Row]:
     cutoff = iso(utc_now() - timedelta(minutes=minutes))
-    return conn.execute(
+    rows = conn.execute(
         """
         select * from wait_reports
         where entrance_slug=? and completed_at>=? and quality_score>=50
@@ -603,6 +639,42 @@ def get_recent_reports(conn: sqlite3.Connection, slug: str, minutes: int = 60) -
         """,
         (slug, cutoff),
     ).fetchall()
+    # One recent report per anonymous client limits repeat submissions from
+    # dominating the estimator while preserving privacy.
+    unique_rows: list[sqlite3.Row] = []
+    seen_clients: set[str] = set()
+    for row in rows:
+        client_key = row["anonymous_client_hash"] or f"report:{row['id']}"
+        if client_key in seen_clients:
+            continue
+        seen_clients.add(client_key)
+        unique_rows.append(row)
+    return unique_rows
+
+
+def report_recency_weight(completed_at: str) -> float:
+    age_minutes = max(0, (utc_now() - parse_iso(completed_at)).total_seconds() / 60)
+    if age_minutes <= 15:
+        return 1.0
+    if age_minutes <= 30:
+        return 0.75
+    if age_minutes <= 45:
+        return 0.5
+    return 0.25
+
+
+def weighted_median(values_and_weights: list[tuple[float, float]]) -> float | None:
+    if not values_and_weights:
+        return None
+    ordered = sorted(values_and_weights, key=lambda item: item[0])
+    total_weight = sum(weight for _, weight in ordered)
+    threshold = total_weight / 2
+    cumulative = 0.0
+    for value, weight in ordered:
+        cumulative += weight
+        if cumulative >= threshold:
+            return value
+    return ordered[-1][0]
 
 
 def confidence_label(score: int) -> str:
@@ -640,20 +712,47 @@ def compute_estimate(slug: str) -> Estimate:
         traffic_age_minutes = max(0, int((utc_now() - parse_iso(latest["observed_at"])).total_seconds() / 60))
         provider = latest["provider"]
 
+    usable_provider = provider == "google-routes" or (provider == "demo-synthetic" and ALLOW_SYNTHETIC_DATA)
+    if traffic_age_minutes is None or traffic_age_minutes > STALE_MAX_AGE_MINUTES or not usable_provider:
+        traffic_delay = None
+
     report_minutes = [row["wait_seconds"] / 60 for row in reports if row["wait_seconds"] is not None]
-    report_median = statistics.median(report_minutes) if report_minutes else None
+    report_median = weighted_median([
+        (row["wait_seconds"] / 60, report_recency_weight(row["completed_at"]))
+        for row in reports
+        if row["wait_seconds"] is not None and row["completed_at"]
+    ])
     traffic_minutes = traffic_delay / 60 if traffic_delay is not None else None
 
-    if report_median is not None and traffic_minutes is not None:
-        report_weight = 0.65 if len(report_minutes) >= 3 else 0.45
+    if traffic_minutes is None:
+        basis = {
+            "traffic_provider": provider,
+            "traffic_age_minutes": traffic_age_minutes,
+            "traffic_delay_minutes": None,
+            "community_report_median_minutes": round(report_median, 1) if report_median is not None else None,
+            "community_report_count": len(report_minutes),
+            "notice": "A current traffic observation is required before a public wait estimate is shown.",
+            "coordinate_notice": "Approach coordinates still require field validation.",
+        }
+        return Estimate(
+            low=None,
+            median=None,
+            high=None,
+            queue_distance_miles=None,
+            trend="Unavailable",
+            confidence_score=0,
+            confidence_level="Unavailable",
+            recent_report_count=len(report_minutes),
+            traffic_delay_seconds=None,
+            data_mode="unavailable",
+            basis=basis,
+        )
+
+    if report_median is not None:
+        report_weight = 0.50 if len(report_minutes) >= 3 else 0.30
         center = report_median * report_weight + traffic_minutes * (1 - report_weight)
-    elif report_median is not None:
-        center = report_median
-    elif traffic_minutes is not None:
-        center = traffic_minutes
     else:
-        low, high = template_wait(slug, utc_now())
-        center = (low + high) / 2
+        center = traffic_minutes
 
     spread = 8.0
     if len(report_minutes) >= 3:
@@ -690,24 +789,20 @@ def compute_estimate(slug: str) -> Estimate:
     elif provider == "demo-synthetic" and report_minutes:
         data_mode = "demo+reports"
 
-    queue_miles = None
-    if traffic_minutes is not None:
-        # Coarse display proxy only. Ground-truth queue-start coordinates should replace this.
-        queue_miles = round(max(0, traffic_minutes) / 14, 1)
-
     basis = {
         "traffic_provider": provider,
         "traffic_age_minutes": traffic_age_minutes,
         "traffic_delay_minutes": round(traffic_minutes, 1) if traffic_minutes is not None else None,
-        "verified_report_median_minutes": round(report_median, 1) if report_median is not None else None,
-        "verified_report_count": len(report_minutes),
-        "coordinate_notice": "Starter approach coordinates require field verification before production.",
+        "community_report_median_minutes": round(report_median, 1) if report_median is not None else None,
+        "community_report_count": len(report_minutes),
+        "community_report_weight": report_weight if report_median is not None else 0,
+        "coordinate_notice": "Approach coordinates still require field validation.",
     }
     return Estimate(
         low=low,
         median=median,
         high=high,
-        queue_distance_miles=queue_miles,
+        queue_distance_miles=None,
         trend=calculate_trend(snapshots),
         confidence_score=score,
         confidence_level=confidence_label(score),
@@ -719,6 +814,8 @@ def compute_estimate(slug: str) -> Estimate:
 
 
 def persist_estimate(slug: str, estimate: Estimate) -> None:
+    if estimate.low is None or estimate.median is None or estimate.high is None:
+        return
     with database() as conn:
         conn.execute(
             """
@@ -735,9 +832,76 @@ def persist_estimate(slug: str, estimate: Estimate) -> None:
                 estimate.confidence_score, estimate.confidence_level,
                 estimate.recent_report_count, estimate.traffic_delay_seconds,
                 estimate.data_mode, json.dumps(estimate.basis, separators=(",", ":")),
-                "mvp-heuristic-0.4",
+                "beta-heuristic-0.5",
             ),
         )
+
+
+def cleanup_old_reports() -> dict[str, int]:
+    abandoned_cutoff = iso(utc_now() - timedelta(hours=ABANDONED_REPORT_RETENTION_HOURS))
+    identifier_cutoff = iso(utc_now() - timedelta(days=REPORT_IDENTIFIER_RETENTION_DAYS))
+    with database() as conn:
+        deleted = conn.execute(
+            "delete from wait_reports where completed_at is null and created_at<?",
+            (abandoned_cutoff,),
+        ).rowcount
+        anonymized = conn.execute(
+            """
+            update wait_reports
+            set anonymous_client_hash=null, report_secret_hash=null, updated_at=?
+            where completed_at is not null and completed_at<?
+              and (anonymous_client_hash is not null or report_secret_hash is not null)
+            """,
+            (iso(), identifier_cutoff),
+        ).rowcount
+    return {"abandonedDeleted": deleted, "identifiersAnonymized": anonymized}
+
+
+def maybe_backup_database() -> dict[str, Any]:
+    now = utc_now()
+    with database() as conn:
+        row = conn.execute(
+            "select value from service_state where key='last-backup-at'"
+        ).fetchone()
+    if row:
+        try:
+            if now - parse_iso(row["value"]) < timedelta(hours=BACKUP_INTERVAL_HOURS):
+                return {"created": False, "reason": "not-due", "lastBackupAt": row["value"]}
+        except (TypeError, ValueError):
+            pass
+
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    backup_path = BACKUP_DIR / f"rainier_waits-{now.strftime('%Y%m%dT%H%M%SZ')}.sqlite3"
+    source = connect()
+    destination = sqlite3.connect(backup_path)
+    try:
+        source.backup(destination)
+    finally:
+        destination.close()
+        source.close()
+
+    backups = sorted(BACKUP_DIR.glob("rainier_waits-*.sqlite3"), key=lambda path: path.stat().st_mtime, reverse=True)
+    for old_backup in backups[BACKUP_RETENTION_COUNT:]:
+        old_backup.unlink(missing_ok=True)
+    with database() as conn:
+        conn.execute(
+            "insert or replace into service_state(key, value, updated_at) values ('last-backup-at', ?, ?)",
+            (iso(now), iso(now)),
+        )
+    return {"created": True, "path": str(backup_path.name), "lastBackupAt": iso(now)}
+
+
+def update_poll_state(errors: dict[str, list[str]]) -> None:
+    now = iso()
+    route_failed = bool(errors.get("google_routes")) or not GOOGLE_ROUTES_API_KEY
+    with POLL_STATE_LOCK:
+        POLL_STATE["lastAttemptAt"] = now
+        POLL_STATE["lastErrors"] = errors
+        if route_failed:
+            POLL_STATE["consecutiveFailedCycles"] += 1
+        else:
+            POLL_STATE["lastSuccessAt"] = now
+            POLL_STATE["consecutiveFailedCycles"] = 0
 
 
 def poll_all() -> dict[str, Any]:
@@ -747,7 +911,7 @@ def poll_all() -> dict[str, Any]:
         google_errors = poll_google_routes()
         if google_errors:
             errors["google_routes"] = google_errors
-    else:
+    elif ALLOW_SYNTHETIC_DATA:
         seed_demo_snapshots()
     nps_errors = poll_nps_alerts()
     if nps_errors:
@@ -757,7 +921,20 @@ def poll_all() -> dict[str, Any]:
         errors["wsdot"] = wsdot_errors
     for slug in ENTRANCES:
         persist_estimate(slug, compute_estimate(slug))
-    return {"started_at": iso(started), "completed_at": iso(), "errors": errors}
+    cleanup = cleanup_old_reports()
+    try:
+        backup = maybe_backup_database()
+    except Exception as exc:
+        backup = {"created": False, "error": redact_secrets(str(exc))}
+        errors.setdefault("backup", []).append(backup["error"])
+    update_poll_state(errors)
+    return {
+        "started_at": iso(started),
+        "completed_at": iso(),
+        "errors": errors,
+        "cleanup": cleanup,
+        "backup": backup,
+    }
 
 
 def current_payload() -> dict[str, Any]:
@@ -775,33 +952,180 @@ def current_payload() -> dict[str, Any]:
             age_minutes = None
             if observed_at:
                 age_minutes = max(0, int((utc_now() - parse_iso(observed_at)).total_seconds() / 60))
-            status = "severe" if estimate.high >= 45 else "moderate" if estimate.high >= 20 else "clear"
+            polling_active = within_polling_window()
+            entrance_closed = slug in CLOSED_ENTRANCES
+            displayable = (
+                not entrance_closed
+                and estimate.high is not None
+                and age_minutes is not None
+                and age_minutes <= STALE_MAX_AGE_MINUTES
+            )
+            if entrance_closed:
+                freshness_status = "closed"
+            elif not displayable:
+                freshness_status = "unavailable"
+            elif not polling_active:
+                freshness_status = "last-daytime"
+            elif age_minutes <= CURRENT_MAX_AGE_MINUTES:
+                freshness_status = "current"
+            else:
+                freshness_status = "stale"
+
+            if entrance_closed:
+                status = "closed"
+            elif not displayable:
+                status = "unavailable"
+            else:
+                status = "severe" if estimate.high >= 45 else "moderate" if estimate.high >= 20 else "clear"
+            status_labels = {
+                "severe": "Heavy delay",
+                "moderate": "Moderate delay",
+                "clear": "Little delay",
+                "unavailable": "Estimate unavailable",
+                "closed": "Entrance reported closed",
+            }
             items.append({
                 "id": slug,
                 "name": entry["name"],
                 "approach": entry["approach"],
-                "min": estimate.low,
-                "median": estimate.median,
-                "max": estimate.high,
-                "queueMiles": estimate.queue_distance_miles,
-                "trend": estimate.trend,
-                "confidence": estimate.confidence_level,
-                "confidenceScore": estimate.confidence_score,
+                "min": estimate.low if displayable else None,
+                "median": estimate.median if displayable else None,
+                "max": estimate.high if displayable else None,
+                "queueMiles": None,
+                "trend": estimate.trend if displayable else "Unavailable",
+                "confidence": estimate.confidence_level if displayable else "Unavailable",
+                "confidenceScore": estimate.confidence_score if displayable else 0,
                 "reports": estimate.recent_report_count,
                 "updatedMinutes": age_minutes,
                 "observedAt": observed_at,
                 "status": status,
-                "statusLabel": {"severe": "Heavy delay", "moderate": "Moderate delay", "clear": "Little delay"}[status],
-                "dataMode": estimate.data_mode,
+                "statusLabel": status_labels[status],
+                "dataMode": estimate.data_mode if displayable else "unavailable",
+                "displayable": displayable,
+                "freshnessStatus": freshness_status,
+                "pollingActiveNow": polling_active,
+                "entranceClosed": entrance_closed,
                 "basis": estimate.basis,
                 "seasonal": entry["seasonal"],
             })
-    global_mode = "live" if modes and all(mode.startswith("live") for mode in modes) else "demo" if modes and all(mode.startswith("demo") for mode in modes) else "mixed"
+    displayed_modes = {item["dataMode"] for item in items}
+    if displayed_modes == {"unavailable"}:
+        global_mode = "unavailable"
+    elif displayed_modes and all(mode.startswith("live") for mode in displayed_modes):
+        global_mode = "live"
+    elif displayed_modes and all(mode.startswith("demo") for mode in displayed_modes):
+        global_mode = "demo"
+    else:
+        global_mode = "mixed"
     return {
         "generatedAt": iso(),
         "dataMode": global_mode,
         "pollIntervalSeconds": POLL_SECONDS,
         "entrances": items,
+    }
+
+
+def health_payload() -> dict[str, Any]:
+    now = utc_now()
+    polling_active = within_polling_window(now)
+    database_writable = False
+    database_error = None
+    recent_report_count = 0
+    last_backup_at = None
+    entrance_health: dict[str, dict[str, Any]] = {}
+    try:
+        with database() as conn:
+            conn.execute(
+                "insert or replace into service_state(key, value, updated_at) values ('health-check', 'ok', ?)",
+                (iso(now),),
+            )
+            database_writable = True
+            recent_report_count = conn.execute(
+                "select count(*) as count from wait_reports where completed_at>=?",
+                (iso(now - timedelta(hours=24)),),
+            ).fetchone()["count"]
+            backup_row = conn.execute(
+                "select value from service_state where key='last-backup-at'"
+            ).fetchone()
+            last_backup_at = backup_row["value"] if backup_row else None
+            for slug in ENTRANCES:
+                latest = conn.execute(
+                    """
+                    select observed_at, provider from traffic_snapshots
+                    where entrance_slug=? order by observed_at desc limit 1
+                    """,
+                    (slug,),
+                ).fetchone()
+                age_minutes = None
+                provider = None
+                if latest:
+                    provider = latest["provider"]
+                    age_minutes = max(0, int((now - parse_iso(latest["observed_at"])).total_seconds() / 60))
+                entrance_closed = slug in CLOSED_ENTRANCES
+                usable_provider = provider == "google-routes" or (provider == "demo-synthetic" and ALLOW_SYNTHETIC_DATA)
+                if entrance_closed:
+                    freshness = "closed"
+                elif not usable_provider or age_minutes is None or age_minutes > STALE_MAX_AGE_MINUTES:
+                    freshness = "unavailable"
+                elif age_minutes <= CURRENT_MAX_AGE_MINUTES:
+                    freshness = "current"
+                else:
+                    freshness = "stale"
+                entrance_health[slug] = {
+                    "lastObservationAt": latest["observed_at"] if latest else None,
+                    "ageMinutes": age_minutes,
+                    "provider": provider,
+                    "freshness": freshness,
+                    "entranceClosed": entrance_closed,
+                }
+    except Exception as exc:
+        database_error = redact_secrets(str(exc))
+
+    try:
+        disk = shutil.disk_usage(DB_PATH.parent)
+        disk_free_mb = round(disk.free / (1024 * 1024), 1)
+    except OSError:
+        disk_free_mb = None
+
+    with POLL_STATE_LOCK:
+        poll_state = dict(POLL_STATE)
+
+    data_degraded = polling_active and any(
+        item["freshness"] not in {"current", "closed"} for item in entrance_health.values()
+    )
+    if not database_writable:
+        status = "error"
+    elif data_degraded or (polling_active and not GOOGLE_ROUTES_API_KEY):
+        status = "degraded"
+    else:
+        status = "ok"
+
+    return {
+        "status": status,
+        "time": iso(now),
+        "database": str(DB_PATH.name),
+        "databaseWritable": database_writable,
+        "databaseError": database_error,
+        "diskFreeMegabytes": disk_free_mb,
+        "googleRoutesConfigured": bool(GOOGLE_ROUTES_API_KEY),
+        "npsConfigured": bool(NPS_API_KEY),
+        "wsdotConfigured": bool(WSDOT_ACCESS_CODE),
+        "syntheticDataAllowed": ALLOW_SYNTHETIC_DATA,
+        "reportLocationsAccepted": ACCEPT_REPORT_LOCATIONS,
+        "closedEntrances": sorted(CLOSED_ENTRANCES),
+        "pollIntervalSeconds": POLL_SECONDS,
+        "pollingWindowLocal": {"startHour": POLL_START_HOUR_LOCAL, "endHour": POLL_END_HOUR_LOCAL},
+        "pollingActiveNow": polling_active,
+        "freshnessThresholdsMinutes": {
+            "currentMaximum": CURRENT_MAX_AGE_MINUTES,
+            "displayMaximum": STALE_MAX_AGE_MINUTES,
+        },
+        "entrances": entrance_health,
+        "completedReportsLast24Hours": recent_report_count,
+        "lastBackupAt": last_backup_at,
+        "backupRetentionCount": BACKUP_RETENTION_COUNT,
+        "poller": poll_state,
+        "requestLogsUseHashedClientIdentifiers": True,
     }
 
 
@@ -828,11 +1152,21 @@ def conditions_payload() -> dict[str, Any]:
         }
         for row in rows
     ]
+    for slug in sorted(CLOSED_ENTRANCES):
+        alerts.insert(0, {
+            "tag": "ENTRANCE STATUS",
+            "title": f"{ENTRANCES[slug]['name']} is marked closed",
+            "detail": "Wait estimates are suppressed by the service's manual entrance-status override. Verify the closure with official NPS information.",
+            "severity": "warning",
+            "entrance": slug,
+            "url": "https://www.nps.gov/mora/planyourvisit/road-status.htm",
+            "observedAt": iso(),
+        })
     if not GOOGLE_ROUTES_API_KEY:
         alerts.insert(0, {
-            "tag": "DEMO MODE",
-            "title": "Traffic observations are synthetic",
-            "detail": "Add GOOGLE_ROUTES_API_KEY to activate traffic-aware approach measurements.",
+            "tag": "TRAFFIC DATA",
+            "title": "Current wait estimates are unavailable",
+            "detail": "Google Routes is not configured. The public beta does not substitute synthetic wait values.",
             "severity": "info",
             "entrance": None,
             "url": None,
@@ -873,7 +1207,7 @@ def forecast_payload(slug: str, date_text: str | None, day_type: str | None) -> 
         "date": date_value.strftime("%Y-%m-%d"),
         "dayType": resolved_day_type,
         "forecastMode": "seasonal-template",
-        "notice": "Planning ranges are templates until sufficient verified historical waits are collected.",
+        "notice": "Experimental seasonal template—not a prediction from current traffic or a validated historical model.",
         "hours": rows,
     }
 
@@ -917,11 +1251,32 @@ def client_hash(ip: str, user_agent: str) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def report_secret_hash(secret: str) -> str:
+    raw = f"{HASH_SECRET}|report-token|{secret}".encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def request_log_identifier(ip: str, user_agent: str) -> str:
+    return client_hash(ip, user_agent)[:12]
+
+
 def rounded_coordinate(value: Any) -> float | None:
     if value is None:
         return None
     number = float(value)
     return round(number, 3)
+
+
+def report_coordinate(payload: dict[str, Any], key: str) -> float | None:
+    if not ACCEPT_REPORT_LOCATIONS:
+        return None
+    return rounded_coordinate(payload.get(key))
+
+
+def report_accuracy(payload: dict[str, Any]) -> float | None:
+    if not ACCEPT_REPORT_LOCATIONS or payload.get("accuracyMeters") is None:
+        return None
+    return float(payload["accuracyMeters"])
 
 
 def start_report(payload: dict[str, Any], client: str) -> dict[str, Any]:
@@ -936,33 +1291,47 @@ def start_report(payload: dict[str, Any], client: str) -> dict[str, Any]:
         if recent_count >= 5:
             raise PermissionError("Too many report starts from this device; try again later")
         report_id = str(uuid.uuid4())
+        report_token = secrets.token_urlsafe(32)
         now = iso()
         conn.execute(
             """
             insert into wait_reports (
-              id, entrance_slug, anonymous_client_hash, started_at,
+              id, entrance_slug, anonymous_client_hash, report_secret_hash, started_at,
               queue_entry_lat, queue_entry_lng, queue_entry_accuracy_meters,
               confirmation_status, created_at, updated_at
-            ) values (?, ?, ?, ?, ?, ?, ?, 'started', ?, ?)
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, 'started', ?, ?)
             """,
             (
-                report_id, slug, client, now,
-                rounded_coordinate(payload.get("latitude")),
-                rounded_coordinate(payload.get("longitude")),
-                float(payload["accuracyMeters"]) if payload.get("accuracyMeters") is not None else None,
+                report_id, slug, client, report_secret_hash(report_token), now,
+                report_coordinate(payload, "latitude"),
+                report_coordinate(payload, "longitude"),
+                report_accuracy(payload),
                 now, now,
             ),
         )
-    return {"reportId": report_id, "entrance": slug, "startedAt": now}
+    return {
+        "reportId": report_id,
+        "reportToken": report_token,
+        "entrance": slug,
+        "startedAt": now,
+    }
 
 
 def complete_report(payload: dict[str, Any], client: str) -> dict[str, Any]:
     report_id = str(payload.get("reportId") or "")
+    supplied_token = str(payload.get("reportToken") or "")
     with database() as conn:
         report = conn.execute("select * from wait_reports where id=?", (report_id,)).fetchone()
         if not report:
             raise KeyError("Report not found")
-        if report["anonymous_client_hash"] != client:
+        stored_token_hash = report["report_secret_hash"]
+        token_matches = bool(
+            stored_token_hash
+            and supplied_token
+            and secrets.compare_digest(stored_token_hash, report_secret_hash(supplied_token))
+        )
+        legacy_client_matches = not stored_token_hash and report["anonymous_client_hash"] == client
+        if not token_matches and not legacy_client_matches:
             raise PermissionError("This report belongs to a different anonymous session")
         if report["completed_at"]:
             return {
@@ -986,8 +1355,8 @@ def complete_report(payload: dict[str, Any], client: str) -> dict[str, Any]:
             """,
             (
                 iso(completed), seconds,
-                rounded_coordinate(payload.get("latitude")),
-                rounded_coordinate(payload.get("longitude")),
+                report_coordinate(payload, "latitude"),
+                report_coordinate(payload, "longitude"),
                 status, quality, iso(completed), report_id,
             ),
         )
@@ -999,7 +1368,7 @@ def complete_report(payload: dict[str, Any], client: str) -> dict[str, Any]:
         "waitSeconds": seconds,
         "qualityScore": quality,
         "status": status,
-        "message": "Saved as a verified candidate" if quality >= 50 else "Saved, but too short to influence public estimates",
+        "message": "Saved as a community wait report" if quality >= 50 else "Saved, but too short to influence public estimates",
     }
 
 
@@ -1022,7 +1391,7 @@ class Poller(threading.Thread):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "RainierGateWaits/0.4"
+    server_version = "RainierGateWaits/0.5"
 
     def client_ip(self) -> str:
         direct = self.client_address[0]
@@ -1038,7 +1407,8 @@ class Handler(BaseHTTPRequestHandler):
         return direct
 
     def log_message(self, fmt: str, *args: Any) -> None:
-        print(f"[{self.log_date_time_string()}] {self.client_ip()} {fmt % args}")
+        identifier = request_log_identifier(self.client_ip(), self.headers.get("User-Agent", ""))
+        print(f"[{self.log_date_time_string()}] client={identifier} {fmt % args}")
 
     def send_json(self, payload: Any, status: int = 200) -> None:
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
@@ -1072,18 +1442,8 @@ class Handler(BaseHTTPRequestHandler):
         query = urllib.parse.parse_qs(parsed.query)
         try:
             if path == "/api/v1/health":
-                self.send_json({
-                    "status": "ok",
-                    "time": iso(),
-                    "database": str(DB_PATH.name),
-                    "googleRoutesConfigured": bool(GOOGLE_ROUTES_API_KEY),
-                    "npsConfigured": bool(NPS_API_KEY),
-                    "wsdotConfigured": bool(WSDOT_ACCESS_CODE),
-                    "pollIntervalSeconds": POLL_SECONDS,
-                    "pollingWindowLocal": {"startHour": POLL_START_HOUR_LOCAL, "endHour": POLL_END_HOUR_LOCAL},
-                    "pollingActiveNow": within_polling_window(),
-                    "trustProxyHeaders": TRUST_PROXY_HEADERS,
-                })
+                health = health_payload()
+                self.send_json(health, 503 if health["status"] == "error" else 200)
                 return
             if path in {"/api/v1/entrances", "/api/v1/entrances/current"}:
                 self.send_json(current_payload())
@@ -1170,6 +1530,11 @@ def first(query: dict[str, list[str]], key: str) -> str | None:
 
 def main() -> None:
     initialize_database()
+    cleanup_old_reports()
+    try:
+        maybe_backup_database()
+    except Exception as exc:
+        print(f"[backup] startup backup failed: {redact_secrets(str(exc))}")
     # Ensure the first page load has observations even before the poller wakes.
     with database() as conn:
         latest = conn.execute("select max(observed_at) as latest from traffic_snapshots").fetchone()["latest"]
@@ -1179,7 +1544,13 @@ def main() -> None:
         Poller(name="rainier-data-poller").start()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"Rainier Gate Waits running at http://{HOST}:{PORT}")
-    print(f"Data mode: {'live traffic' if GOOGLE_ROUTES_API_KEY else 'transparent demo traffic'}")
+    if GOOGLE_ROUTES_API_KEY:
+        mode_description = "live traffic configured"
+    elif ALLOW_SYNTHETIC_DATA:
+        mode_description = "explicit synthetic local demo"
+    else:
+        mode_description = "wait estimates unavailable until Google Routes is configured"
+    print(f"Data mode: {mode_description}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

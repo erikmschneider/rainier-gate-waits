@@ -52,7 +52,7 @@ For the public pilot, run every 15 minutes from 6:00 a.m. through 7:59 p.m. Paci
 2. Store traffic-aware duration, static duration, distance, and vendor timestamp. Do not request traffic-on-polyline unless a future feature actually needs it.
 3. Fetch official alerts and road incidents.
 4. Calculate an initial delay signal.
-5. Blend it with recent verified visitor reports.
+5. Blend it conservatively with recent community-submitted visitor reports.
 6. Publish a cached current estimate.
 
 ### Forecasting worker
@@ -124,6 +124,7 @@ Suggested display bands:
 ## 5. Privacy design
 
 - Generate a random report identifier; do not require an account.
+- Generate a separate random completion token and store only its one-way hash server-side.
 - Round queue-entry coordinates before long-term storage.
 - Delete raw location traces after deriving queue entry, gate crossing, and duration.
 - Retain only derived observations needed for the estimate.
@@ -132,16 +133,16 @@ Suggested display bands:
 
 ## 6. Recommended build sequence
 
-### Phase 1 — instrumented prototype
+### Phase 1 — instrumented public beta
 
 - Implement Nisqually and White River only.
 - Store traffic snapshots and official alerts.
 - Display experimental delay ranges and feed freshness.
-- No public reporting yet.
+- Suppress sample waits and estimates older than the public freshness cutoff.
 
-### Phase 2 — visitor ground truth
+### Phase 2 — stronger visitor ground truth
 
-- Add start/complete wait reports.
+- Improve the existing start/complete community wait reports.
 - Add geofenced suggestions with explicit consent.
 - Build basic anomaly detection and moderation.
 

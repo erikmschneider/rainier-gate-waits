@@ -1,134 +1,107 @@
-# Public pilot deployment — Render
+# Public beta deployment — Render
 
-This configuration publishes the project as one continuously running web service. The same process serves the website, exposes the API, polls traffic and official conditions, and stores observations in SQLite on a persistent disk.
+The Render Blueprint publishes the website, API, poller, SQLite database, retention cleanup, and rotating backups as one service.
 
-Visitors use one HTTPS address. There is no separately managed frontend or backend.
+## Included deployment controls
 
-## What the included `render.yaml` creates
-
-- One Docker-based Render web service
-- Starter compute instance
+- One Docker-based Starter web service
+- One 1 GB persistent disk mounted at `/data`
+- SQLite at `/data/rainier_waits.sqlite3`
+- Daily rotating backups under `/data/backups`
 - Health check at `/api/v1/health`
-- One persistent disk mounted at `/data`
-- SQLite database at `/data/rainier_waits.sqlite3`
-- Automatic deployment after commits to the connected repository
-- Generated privacy and administrator secrets
-- Prompts for Google, NPS, and WSDOT credentials
-- Traffic polling every 15 minutes from 6:00 a.m. through 7:59 p.m. Pacific
+- Automatic deploys from the connected GitHub repository
+- Generated hash and administrator secrets
+- Synthetic traffic explicitly disabled
+- Google Routes polling every 15 minutes from 6:00 a.m. through 7:59 p.m. Pacific
+- Current threshold of 30 minutes and display cutoff of 60 minutes
 
-The daytime polling window substantially reduces traffic-API use. At two route requests every 15 minutes for 14 hours per day, the theoretical maximum is about 3,360 requests in a 30-day month. Actual use will vary slightly with restarts, manual polls, and failed requests.
+At two Google route requests every 15 minutes for 14 hours per day, the theoretical maximum is about 3,360 scheduled requests in a 30-day month. Restarts and manual polls can change actual usage.
 
-## 1. Put the project in GitHub
+## Deploy the update
 
-1. Create a new private GitHub repository, such as `rainier-gate-waits`.
-2. Upload all files in this project folder to the repository root.
-3. Confirm that `.env` files, API keys, and `rainier_waits.sqlite3` are not committed.
-4. Commit and push the files.
+1. Replace the repository files with this package.
+2. Confirm that `.env`, API keys, SQLite files, and backup files are not committed.
+3. Commit and push.
+4. Let Render redeploy automatically.
+5. Confirm that the existing persistent disk remains attached at `/data`.
 
-The repository may later be public because credentials live in Render environment variables, not in the source code. Keeping it private during setup reduces accidental exposure.
+The database initializer performs an in-place migration adding the timer-token hash column. Existing traffic history and completed reports remain intact.
 
-## 2. Create the Render service
+## Required Render settings
 
-1. Sign in to Render and connect the GitHub account containing the repository.
-2. Choose **New > Blueprint**.
-3. Select the repository.
-4. Render reads `render.yaml` and displays the service and disk it will create.
-5. Enter the requested credential values:
-   - `GOOGLE_ROUTES_API_KEY`
-   - `NPS_API_KEY` — optional but recommended
-   - `WSDOT_ACCESS_CODE` — optional but recommended
-6. Approve the Blueprint deployment.
+- `GOOGLE_ROUTES_API_KEY` — required for public estimates
+- `RAINIER_HASH_SECRET` — generated and persistent
+- `RAINIER_ADMIN_TOKEN` — generated and persistent
+- `ALLOW_SYNTHETIC_DATA=false`
+- `ACCEPT_REPORT_LOCATIONS=false` until location verification is intentionally launched
+- `TRUST_PROXY_HEADERS=true`
 
-When the deployment is healthy, Render assigns an address similar to:
+Set `CLOSED_ENTRANCES=white-river` or `CLOSED_ENTRANCES=nisqually,white-river` whenever an official closure should suppress estimates. Clear the value after official reopening.
 
-```text
-https://rainier-gate-waits.onrender.com
-```
+The optional `NPS_API_KEY` and `WSDOT_ACCESS_CODE` can be added later.
 
-## 3. Configure Google Routes
+## Google Routes configuration
 
-1. Create or select a Google Cloud project.
-2. Attach a billing account.
-3. Enable **Routes API**.
-4. Create a dedicated API key for this application.
-5. Restrict the key to **Routes API**.
-6. Set a low quota and a billing budget alert before public launch.
-7. Add the key to `GOOGLE_ROUTES_API_KEY` in Render, not to a source file.
+1. Use the Google Cloud project with active billing.
+2. Enable Routes API.
+3. Restrict the dedicated key to Routes API.
+4. Store the key only in Render.
+5. Set conservative quotas and billing alerts.
 
-The request asks only for traffic-aware duration, static duration, and distance. It does not request `TRAFFIC_ON_POLYLINE`, keeping the call in the lower-priced Compute Routes Pro category rather than Enterprise. The two-entrance schedule is designed to remain below the current 5,000-request monthly Pro allowance, but quotas and billing alerts remain essential.
+The current request uses traffic-adjusted duration, static duration, and distance without `TRAFFIC_ON_POLYLINE`.
 
-Server-IP restrictions are desirable but can be awkward on hosting plans without dedicated outbound IPs. API restriction to Routes API, tight quotas, secret storage, and monitoring are the minimum controls for the pilot.
+## Verify after deployment
 
-## 4. Add official-condition keys
-
-- Request a free NPS developer key and save it as `NPS_API_KEY`.
-- Request a WSDOT Traveler Information access code and save it as `WSDOT_ACCESS_CODE`.
-
-Neither key is exposed to the browser.
-
-## 5. Verify the public service
-
-Check these addresses after deployment:
+Check:
 
 ```text
 /
+/privacy.html
 /api/v1/health
 /api/v1/entrances/current
 /api/v1/conditions
 ```
 
-The health response should report:
+During daytime polling, `/api/v1/health` should show:
 
+- `databaseWritable: true`
 - `googleRoutesConfigured: true`
-- `pollingActiveNow: true` during the configured daytime window
-- database name `rainier_waits.sqlite3`
+- each entrance at `current` freshness after a successful poll
+- `consecutiveFailedCycles: 0`
+- a non-null `lastBackupAt` after the first scheduled backup
 
-On the homepage, confirm that values are labeled live rather than demo after the first successful Google poll.
+The homepage must show `Unavailable` rather than sample numbers whenever no recent observation exists. Confirm that a 31–60 minute observation is labeled stale, and that values disappear after 60 minutes.
 
-## 6. Validate the entrance segments before promotion
+## Timer validation
 
-The coordinates in `server.py` remain preliminary. Before advertising the estimates:
+On a phone:
 
-1. Drive each entrance approach while recording actual stopwatch wait time.
-2. Compare actual wait with API-added travel time.
-3. Move the origin far enough upstream to capture the longest plausible queue.
-4. Ensure the destination lies beyond the entrance booth but before unrelated internal congestion.
-5. Repeat with no queue, moderate queue, and a heavy weekend queue.
-6. Adjust the estimator separately for each entrance.
+1. Start a timer on Wi-Fi.
+2. Switch to cellular.
+3. Reload the page.
+4. Confirm that the timer resumes.
+5. Complete it and confirm the report saves.
+6. Confirm that the application logs show a short `client=` identifier rather than a raw IP address.
 
-Do not describe the site as accurate or predictive until this validation is completed.
+## Field validation before broad promotion
 
-## 7. Add a custom domain
+The route coordinates remain preliminary. For both entrances:
 
-After the pilot works at the Render address:
+1. Record the queue-end location and actual gate wait.
+2. Compare the observed wait with Google’s added travel time.
+3. Test no-queue, moderate, and heavy conditions.
+4. Move the origin upstream if a long queue can extend beyond it.
+5. Ensure the destination is beyond the booth but before unrelated internal congestion.
+6. Document any entrance-specific correction factor.
 
-1. Buy a domain or choose a subdomain.
-2. Add it under the Render service's **Custom Domains** settings.
-3. Add the DNS records Render provides.
-4. Verify the domain.
+A small closed beta can begin before full calibration, but broad public promotion should wait for preliminary paired field observations.
 
-Render manages the TLS certificate and redirects HTTP requests to HTTPS.
+## Remaining beta work
 
-## 8. Minimum public-launch additions
-
-Before broadly sharing the site, add:
-
-- Privacy and methodology pages
-- A visible independent/non-NPS disclaimer
-- Automatic retention cleanup for old raw report data
-- A closed-entrance override and seasonal schedule
-- Error monitoring and an alert for stale traffic data
-- A lightweight administrative review page
-- Field-tested entrance coordinates
-
-## Expected pilot cost
-
-Using current published pricing, the baseline is approximately:
-
-- Render Starter web service: $7 per month
-- Render disk: storage billed per GB per month
-- Google Routes: expected to remain within the current included Pro request allowance at roughly 3,360 scheduled requests per 30-day month; overage remains possible from manual testing or configuration changes
-- Domain: typically an annual registrar charge
-- NPS and WSDOT keys: no fee indicated for basic access
-
-Treat these as planning figures rather than guarantees; vendor pricing and usage can change.
+- Closed-entrance and seasonal-status overrides
+- Automating the currently manual entrance-status override from an authoritative source
+- External alerting for degraded health or consecutive route failures
+- A public feedback/inaccuracy form
+- Field-calibrated route geometry and estimator adjustments
+- Optional location verification for community timers
+- A methodology/version history page
