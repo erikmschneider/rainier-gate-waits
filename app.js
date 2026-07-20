@@ -165,6 +165,7 @@ function renderEntranceCards() {
           <div><span>Community reports</span><strong>${Number(entrance.reports) || 0}</strong></div>
           <div><span>Observation</span><strong>${escapeHtml(freshnessLabel(entrance))}</strong></div>
         </div>
+        <button class="feedback-card-link" type="button" data-feedback-entrance="${escapeHtml(entrance.id)}">Report an inaccurate estimate</button>
       </article>
     `;
   }).join("");
@@ -438,6 +439,102 @@ function restoreTimer() {
   }
 }
 
+function feedbackEstimateText(entrance) {
+  if (!entrance || !isDisplayable(entrance)) return "No estimate was displayed";
+  return `${waitLabel(entrance)} minutes · ${freshnessLabel(entrance)}`;
+}
+
+function setFeedbackMode(type, entranceId = "") {
+  const form = document.querySelector("#feedback-form");
+  const accuracyFields = document.querySelector("#feedback-accuracy-fields");
+  const entrance = entranceId ? entrances[entranceId] || unavailableEntrances[entranceId] : null;
+  form.reset();
+  form.elements.feedbackType.value = type;
+  form.elements.pagePath.value = window.location.pathname;
+  form.elements.website.value = "";
+  document.querySelector("#feedback-status").textContent = "";
+
+  if (type === "accuracy") {
+    document.querySelector("#feedback-dialog-title").textContent = "Report an inaccurate estimate";
+    document.querySelector("#feedback-dialog-intro").textContent = "Tell us what the site showed and what you actually experienced. This report will be reviewed and will not automatically change the live estimate.";
+    accuracyFields.hidden = false;
+    form.elements.entrance.value = entranceId;
+    form.elements.category.value = "estimate-accuracy";
+    form.elements.actualWaitMinutes.required = true;
+    form.elements.message.required = false;
+    form.elements.displayedLowMinutes.value = Number.isFinite(entrance?.min) ? entrance.min : "";
+    form.elements.displayedHighMinutes.value = Number.isFinite(entrance?.max) ? entrance.max : "";
+    form.elements.displayedObservedAt.value = entrance?.observedAt || "";
+    document.querySelector("#feedback-estimate-summary").textContent = feedbackEstimateText(entrance);
+  } else {
+    document.querySelector("#feedback-dialog-title").textContent = "Send beta feedback";
+    document.querySelector("#feedback-dialog-intro").textContent = "Report a timer or website problem, confusing information, or an idea for improving the beta.";
+    accuracyFields.hidden = true;
+    form.elements.entrance.value = "";
+    form.elements.category.value = "other";
+    form.elements.actualWaitMinutes.required = false;
+    form.elements.message.required = true;
+    form.elements.displayedLowMinutes.value = "";
+    form.elements.displayedHighMinutes.value = "";
+    form.elements.displayedObservedAt.value = "";
+  }
+}
+
+function openFeedback(type, entranceId = "") {
+  setFeedbackMode(type, entranceId);
+  const dialog = document.querySelector("#feedback-dialog");
+  if (typeof dialog.showModal === "function") {
+    dialog.showModal();
+  } else {
+    dialog.setAttribute("open", "");
+  }
+}
+
+function closeFeedback() {
+  const dialog = document.querySelector("#feedback-dialog");
+  if (typeof dialog.close === "function") dialog.close();
+  else dialog.removeAttribute("open");
+}
+
+async function submitFeedback(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const submitButton = form.querySelector('button[type="submit"]');
+  const status = document.querySelector("#feedback-status");
+  const gateArrivalValue = form.elements.gateArrivalAt.value;
+  const payload = {
+    feedbackType: form.elements.feedbackType.value,
+    category: form.elements.category.value,
+    entrance: form.elements.entrance.value || null,
+    displayedLowMinutes: form.elements.displayedLowMinutes.value || null,
+    displayedHighMinutes: form.elements.displayedHighMinutes.value || null,
+    displayedObservedAt: form.elements.displayedObservedAt.value || null,
+    actualWaitMinutes: form.elements.actualWaitMinutes.value || null,
+    gateArrivalAt: gateArrivalValue ? new Date(gateArrivalValue).toISOString() : null,
+    message: form.elements.message.value,
+    contactEmail: form.elements.contactEmail.value,
+    pagePath: form.elements.pagePath.value,
+    website: form.elements.website.value
+  };
+  submitButton.disabled = true;
+  status.className = "form-status";
+  status.textContent = "Submitting…";
+  try {
+    const result = await apiFetch("/api/v1/feedback", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    status.className = "form-status success";
+    status.textContent = result.message || "Thank you—your feedback was saved.";
+    window.setTimeout(closeFeedback, 1400);
+  } catch (error) {
+    status.className = "form-status error";
+    status.textContent = error.message;
+  } finally {
+    submitButton.disabled = false;
+  }
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -464,6 +561,16 @@ async function initialize() {
   document.querySelector("#planner-date").addEventListener("change", loadForecast);
   document.querySelector("#start-timer").addEventListener("click", startTimer);
   document.querySelector("#stop-timer").addEventListener("click", stopTimer);
+  document.querySelector("#entrance-cards").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-feedback-entrance]");
+    if (button) openFeedback("accuracy", button.dataset.feedbackEntrance);
+  });
+  document.querySelector("#general-feedback-link").addEventListener("click", () => openFeedback("general"));
+  document.querySelector("#feedback-form").addEventListener("submit", submitFeedback);
+  document.querySelectorAll("[data-close-feedback]").forEach((button) => button.addEventListener("click", closeFeedback));
+  document.querySelector("#feedback-dialog").addEventListener("click", (event) => {
+    if (event.target === event.currentTarget) closeFeedback();
+  });
 
   window.setInterval(() => {
     loadCurrentData();

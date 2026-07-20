@@ -103,3 +103,28 @@ create table hourly_forecasts (
   features jsonb,
   unique (entrance_id, forecast_for, model_version)
 );
+
+
+create table feedback_submissions (
+  id uuid primary key default gen_random_uuid(),
+  feedback_type text not null,
+  category text not null,
+  entrance_id uuid references entrances(id),
+  displayed_low_minutes smallint,
+  displayed_high_minutes smallint,
+  displayed_observed_at timestamptz,
+  actual_wait_minutes smallint,
+  gate_arrival_at timestamptz,
+  message text,
+  contact_email text,
+  site_version text not null,
+  page_path text,
+  anonymous_client_hash text,
+  status text not null default 'new',
+  reviewed_at timestamptz,
+  resolution_notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index feedback_status_created_idx
+  on feedback_submissions (status, created_at desc);

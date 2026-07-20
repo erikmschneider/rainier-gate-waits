@@ -20,6 +20,7 @@ The Python standard-library service hosts the website and API, polls Google Rout
 - Application request logs use short salted client identifiers rather than raw IP addresses.
 - Abandoned timers are deleted after approximately 24 hours; report identifiers are removed after approximately 60 days.
 - Rotating SQLite backups are created approximately daily and retained on the persistent disk.
+- Public feedback is stored separately from estimator inputs, rate-limited, and reviewable only with the administrator token.
 
 ## What is included
 
@@ -31,6 +32,8 @@ The Python standard-library service hosts the website and API, polls Google Rout
 - Preliminary seasonal planning templates, clearly labeled as experimental
 - Health endpoint with per-entrance freshness, database writability, disk space, poll errors, report volume, and backup status
 - Privacy notice and links to official NPS conditions and road status
+- Estimate-accuracy and general beta-feedback forms
+- Private feedback dashboard with review statuses, notes, and CSV export
 - Automated Python tests
 - No third-party Python packages
 
@@ -75,14 +78,13 @@ The API key remains on the server. The Google request asks only for traffic-adju
 
 Before broad promotion, field-test the approach origin and destination coordinates in `server.py`. They remain preliminary and are not survey-grade queue points.
 
-## Optional condition feeds
+## Optional WSDOT condition feed
 
 ```text
-NPS_API_KEY=...
 WSDOT_ACCESS_CODE=...
 ```
 
-The public interface also links directly to official NPS alerts and road status even when these optional APIs are not configured.
+The public interface links directly to official NPS conditions and road status; it does not currently ingest an NPS alert feed.
 
 ## Deploy on Render
 
@@ -98,6 +100,7 @@ python3 -m unittest discover -s tests -v
 
 - `index.html`, `styles.css`, `app.js` — public interface
 - `privacy.html` — public privacy notice
+- `admin-feedback.html`, `admin-feedback.js` — token-protected feedback review interface
 - `server.py` — API, polling, estimator, health monitoring, retention, backups, and SQLite persistence
 - `API.md` — endpoint contract
 - `PUBLIC_DEPLOYMENT.md` — Render deployment and beta checklist
@@ -108,3 +111,9 @@ python3 -m unittest discover -s tests -v
 The current estimate is a heuristic range based primarily on Google’s added travel time on a fixed approach segment. Recent community timers receive limited, recency-weighted influence. Physical queue length is not shown because it has not yet been measured reliably.
 
 The planning chart is a preliminary seasonal template. It is not a prediction from current traffic and has not yet been validated against a sufficient historical dataset.
+
+## Review beta feedback
+
+Open `/admin-feedback.html` on the deployed site and enter the `RAINIER_ADMIN_TOKEN` value from Render. The token is stored only in the current browser tab. The dashboard can filter submissions, mark them reviewed or useful for calibration, add private notes, and download CSV.
+
+Feedback records live in the same persistent SQLite database and are included in the rotating backups. They never influence wait estimates automatically.

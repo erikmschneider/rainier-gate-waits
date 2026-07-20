@@ -31,6 +31,7 @@ class ServerTests(unittest.TestCase):
             conn.execute("delete from wait_reports")
             conn.execute("delete from traffic_snapshots")
             conn.execute("delete from condition_events")
+            conn.execute("delete from feedback_submissions")
 
     def test_google_duration_parser(self):
         self.assertEqual(server.parse_google_duration("3.5s"), 4)
@@ -172,12 +173,96 @@ class ServerTests(unittest.TestCase):
         with self.assertRaises(PermissionError):
             server.complete_report({"reportId": started["reportId"]}, "test-client")
 
+    def test_conditions_exclude_legacy_nps_feed_records(self):
+        server.upsert_condition(
+            source="nps",
+            source_event_id="legacy-alert",
+            title="Legacy NPS feed alert",
+            detail="Should not be returned",
+            severity="warning",
+            url="https://example.invalid",
+        )
+        payload = server.conditions_payload()
+        self.assertFalse(any(alert.get("tag") == "NPS" for alert in payload["alerts"]))
+        self.assertFalse(any("API" in alert.get("detail", "") for alert in payload["alerts"]))
+
+    def test_accuracy_feedback_round_trip_and_admin_review(self):
+        result = server.create_feedback(
+            {
+                "feedbackType": "accuracy",
+                "category": "estimate-accuracy",
+                "entrance": "nisqually",
+                "displayedLowMinutes": 20,
+                "displayedHighMinutes": 30,
+                "displayedObservedAt": "2026-07-20T18:00:00Z",
+                "actualWaitMinutes": 47,
+                "gateArrivalAt": "2026-07-20T18:50:00Z",
+                "message": "Queue began before the route origin.",
+                "contactEmail": "visitor@example.com",
+                "pagePath": "/",
+            },
+            "feedback-client",
+        )
+        self.assertTrue(result["accepted"])
+        payload = server.feedback_admin_payload()
+        self.assertEqual(payload["total"], 1)
+        item = payload["submissions"][0]
+        self.assertEqual(item["actualWaitMinutes"], 47)
+        self.assertEqual(item["status"], "new")
+
+        updated = server.update_feedback(
+            result["feedbackId"],
+            {"status": "calibration", "resolutionNotes": "Use during route validation."},
+        )
+        self.assertEqual(updated["status"], "calibration")
+        filtered = server.feedback_admin_payload("calibration")
+        self.assertEqual(filtered["total"], 1)
+
+    def test_general_feedback_requires_details(self):
+        with self.assertRaises(ValueError):
+            server.create_feedback(
+                {"feedbackType": "general", "category": "website-problem", "message": ""},
+                "feedback-client",
+            )
+
+    def test_feedback_honeypot_is_not_stored(self):
+        result = server.create_feedback(
+            {"feedbackType": "general", "message": "Bot message", "website": "spam.example"},
+            "feedback-client",
+        )
+        self.assertTrue(result["accepted"])
+        self.assertEqual(server.feedback_admin_payload()["total"], 0)
+
+    def test_feedback_rate_limit_and_csv_export(self):
+        with mock.patch.object(server, "FEEDBACK_RATE_LIMIT_PER_HOUR", 2):
+            for number in range(2):
+                server.create_feedback(
+                    {
+                        "feedbackType": "general",
+                        "category": "feature-suggestion",
+                        "message": "=2+2" if number == 0 else f"Suggestion {number}",
+                    },
+                    "feedback-client",
+                )
+            with self.assertRaises(PermissionError):
+                server.create_feedback(
+                    {"feedbackType": "general", "message": "One too many"},
+                    "feedback-client",
+                )
+        csv_text = server.feedback_csv_bytes().decode("utf-8-sig")
+        self.assertIn("'=2+2", csv_text)
+        self.assertIn("Suggestion 1", csv_text)
+        self.assertNotIn("anonymous_client_hash", csv_text)
+
     def test_health_payload_includes_freshness_and_storage_checks(self):
         payload = server.health_payload()
         self.assertTrue(payload["databaseWritable"])
         self.assertIn("nisqually", payload["entrances"])
         self.assertIn("diskFreeMegabytes", payload)
+        self.assertNotIn("npsConfigured", payload)
         self.assertTrue(payload["requestLogsUseHashedClientIdentifiers"])
+        self.assertIn("feedbackSubmissionsLast24Hours", payload)
+        self.assertIn("unreviewedFeedbackSubmissions", payload)
 
 
 if __name__ == "__main__":

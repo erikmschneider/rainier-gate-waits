@@ -29,7 +29,7 @@
       <article class="legal-card">
         <p class="eyebrow">Public beta</p>
         <h1>Privacy notice</h1>
-        <p class="updated">Last updated July 19, 2026</p>
+        <p class="updated">Last updated July 20, 2026</p>
         <p>Rainier Gate Waits is designed to collect only the information needed to operate anonymous community wait timers and protect the service from abuse.</p>
 
         <h2>Information collected for a wait report</h2>
@@ -42,6 +42,16 @@
         </ul>
         <p>The application does not store a visitor’s route, name, email address, or account information. Raw IP addresses are not printed in application request logs. The hosting provider may process ordinary request metadata under its own service terms.</p>
 
+        <h2>Information collected for beta feedback</h2>
+        <ul>
+          <li>The feedback category and optional entrance.</li>
+          <li>The estimate displayed and actual wait reported when submitting an accuracy report.</li>
+          <li>Any message the visitor chooses to provide.</li>
+          <li>An optional email address when the visitor requests follow-up.</li>
+          <li>A temporary salted identifier used only for rate limiting.</li>
+        </ul>
+        <p>Feedback is private and is not automatically incorporated into a live wait estimate.</p>
+
         <h2>Private timer token</h2>
         <p>When a server-backed timer begins, the browser receives a random completion token. The browser stores that token locally so the timer can still be completed after a network change or page reload. The server stores only a one-way hash of the token.</p>
 
@@ -52,6 +62,8 @@
         <ul>
           <li>Abandoned timer starts are deleted after approximately 24 hours.</li>
           <li>Anonymous client identifiers and timer-token hashes are removed from completed reports after approximately 60 days.</li>
+          <li>Feedback rate-limit identifiers are removed after approximately 30 days.</li>
+          <li>Feedback submissions, including optional contact information, are deleted after approximately one year unless removed sooner.</li>
           <li>Aggregate estimates and non-identifying durations may be retained to evaluate and improve the beta.</li>
         </ul>
 

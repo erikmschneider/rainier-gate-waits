@@ -260,7 +260,7 @@
           <ul>
             <li>Traffic-routing API</li>
             <li>Visitor wait timers</li>
-            <li>NPS alerts and entrance status</li>
+            <li>Manual entrance-status updates</li>
             <li>WSDOT incidents and closures</li>
             <li>Weather observations</li>
           </ul>
@@ -275,9 +275,83 @@
         <strong>Rainier Gate Waits</strong>
         <p>Independent public beta. Not affiliated with or endorsed by the National Park Service.</p>
       </div>
-      <p><a href="privacy.html">Privacy</a> · <a href="/api/v1/health">System health</a></p>
+      <p><button class="footer-link-button" type="button" id="general-feedback-link">Send beta feedback</button> · <a href="privacy.html">Privacy</a> · <a href="/api/v1/health">System health</a></p>
     </div>
   </footer>
+
+  <dialog class="feedback-dialog" id="feedback-dialog" aria-labelledby="feedback-dialog-title">
+    <form class="feedback-form" id="feedback-form">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">Public beta</p>
+          <h2 id="feedback-dialog-title">Send beta feedback</h2>
+        </div>
+        <button class="dialog-close" type="button" data-close-feedback aria-label="Close feedback form">×</button>
+      </div>
+      <p id="feedback-dialog-intro">Help improve Rainier Gate Waits.</p>
+
+      <input type="hidden" name="feedbackType" value="general" />
+      <input type="hidden" name="displayedLowMinutes" />
+      <input type="hidden" name="displayedHighMinutes" />
+      <input type="hidden" name="displayedObservedAt" />
+      <input type="hidden" name="pagePath" />
+      <label class="honeypot" aria-hidden="true">Website<input type="text" name="website" tabindex="-1" autocomplete="off" /></label>
+
+      <div class="feedback-grid">
+        <label>
+          Feedback category
+          <select name="category" required>
+            <option value="estimate-accuracy">Estimate accuracy</option>
+            <option value="timer-problem">Timer problem</option>
+            <option value="website-problem">Website problem</option>
+            <option value="confusing-information">Confusing information</option>
+            <option value="feature-suggestion">Feature suggestion</option>
+            <option value="other">Other</option>
+          </select>
+        </label>
+        <label>
+          Entrance — optional
+          <select name="entrance">
+            <option value="">Not entrance-specific</option>
+            <option value="nisqually">Nisqually Entrance</option>
+            <option value="white-river">White River Entrance</option>
+          </select>
+        </label>
+      </div>
+
+      <div id="feedback-accuracy-fields" class="accuracy-fields" hidden>
+        <div class="captured-estimate">
+          <span>Estimate shown</span>
+          <strong id="feedback-estimate-summary">Unavailable</strong>
+        </div>
+        <div class="feedback-grid">
+          <label>
+            Actual wait in minutes
+            <input type="number" name="actualWaitMinutes" min="0" max="300" inputmode="numeric" />
+          </label>
+          <label>
+            Approximate time you reached the booth
+            <input type="datetime-local" name="gateArrivalAt" />
+          </label>
+        </div>
+      </div>
+
+      <label>
+        Details <span class="label-note">Do not include sensitive personal information.</span>
+        <textarea name="message" maxlength="2000" rows="5" placeholder="What happened, or what should be improved?"></textarea>
+      </label>
+      <label>
+        Email for follow-up — optional
+        <input type="email" name="contactEmail" maxlength="254" autocomplete="email" />
+      </label>
+      <p class="feedback-privacy">Feedback is stored privately for beta review and does not automatically change an estimate. <a href="privacy.html">Privacy details</a>.</p>
+      <p class="form-status" id="feedback-status" role="status" aria-live="polite"></p>
+      <div class="dialog-actions">
+        <button class="button secondary" type="button" data-close-feedback>Cancel</button>
+        <button class="button primary" type="submit">Submit feedback</button>
+      </div>
+    </form>
+  </dialog>
 
   <script src="app.js"></script>
 </body>

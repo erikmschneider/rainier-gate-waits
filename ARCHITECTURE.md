@@ -11,12 +11,16 @@ The starter now includes a standard-library Python API and SQLite persistence. I
 - `/` — current wait overview
 - `/entrance/:slug` — detailed entrance page with current conditions, trend, queue map, and recent observations
 - `/plan` — date/hour forecast tool
-- `/report` — start, complete, and review a visitor wait report
+- `/report` — start and complete a visitor wait report
+- Public modal forms — report estimate inaccuracies and send general beta feedback
 - `/methodology` — model documentation, data freshness, privacy, and limitations
 - `/status` — feed health and incidents affecting estimates
 
 ### Administrative console
 
+- Review public beta feedback at `/admin-feedback.html`
+- Mark feedback as reviewed, useful for calibration, resolved, or spam
+- Add private review notes and export CSV
 - Review anomalous visitor reports
 - Mark incidents that contaminate a traffic-delay signal
 - Override entrance open/closed status
@@ -43,6 +47,10 @@ Suggested endpoints:
 - `POST /api/v1/reports/start`
 - `POST /api/v1/reports/complete`
 - `POST /api/v1/reports/:id/confirm`
+- `POST /api/v1/feedback`
+- `GET /api/v1/admin/feedback`
+- `POST /api/v1/admin/feedback/:id`
+- `GET /api/v1/admin/feedback.csv`
 
 ### Scheduled data collection
 

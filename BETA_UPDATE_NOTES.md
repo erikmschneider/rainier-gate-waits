@@ -34,7 +34,7 @@
 - Added detailed per-entrance freshness to `/api/v1/health`.
 - Added database writability, disk space, poll failures, consecutive failed cycles, report volume, and backup status.
 - Added rotating SQLite backups, approximately daily, retaining seven by default.
-- Added official NPS conditions and road-status links.
+- Added official NPS conditions and road-status links without an NPS API feed.
 - Expanded the backend tests from 7 to 13.
 
 ## Database migration
@@ -72,3 +72,21 @@ Use `CLOSED_ENTRANCES=white-river` when White River should be manually suppresse
 - Render request logs show `client=<12-character identifier>` rather than a raw IP.
 - `/privacy.html` loads.
 - `/data/backups` contains a recent SQLite backup.
+
+## v0.5.1 adjustment
+
+- Removed the optional NPS alert-feed integration and its credential configuration for now.
+- Existing stored NPS-feed records are excluded from the public conditions response.
+- Direct links to official NPS conditions and road status remain available.
+
+## v0.6 feedback tools
+
+- Added “Report an inaccurate estimate” to each entrance card.
+- Added a general “Send beta feedback” form in the footer.
+- Added `POST /api/v1/feedback` with validation, a honeypot, and anonymous rate limiting.
+- Added a separate `feedback_submissions` SQLite table; feedback never alters estimates automatically.
+- Added `/admin-feedback.html`, protected at the data layer by `RAINIER_ADMIN_TOKEN`.
+- Added review statuses, private notes, filtering, and CSV export.
+- Added feedback retention controls and privacy-notice language.
+- Added health metrics for recent and unreviewed feedback.
+- Expanded the backend suite to 18 tests.

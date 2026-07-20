@@ -25,7 +25,7 @@ At two Google route requests every 15 minutes for 14 hours per day, the theoreti
 4. Let Render redeploy automatically.
 5. Confirm that the existing persistent disk remains attached at `/data`.
 
-The database initializer performs an in-place migration adding the timer-token hash column. Existing traffic history and completed reports remain intact.
+The database initializer performs in-place migrations for timer tokens and the feedback table. Existing traffic history and completed reports remain intact.
 
 ## Required Render settings
 
@@ -35,10 +35,13 @@ The database initializer performs an in-place migration adding the timer-token h
 - `ALLOW_SYNTHETIC_DATA=false`
 - `ACCEPT_REPORT_LOCATIONS=false` until location verification is intentionally launched
 - `TRUST_PROXY_HEADERS=true`
+- `FEEDBACK_RATE_LIMIT_PER_HOUR=5`
+- `FEEDBACK_IDENTIFIER_RETENTION_DAYS=30`
+- `FEEDBACK_RETENTION_DAYS=365`
 
 Set `CLOSED_ENTRANCES=white-river` or `CLOSED_ENTRANCES=nisqually,white-river` whenever an official closure should suppress estimates. Clear the value after official reopening.
 
-The optional `NPS_API_KEY` and `WSDOT_ACCESS_CODE` can be added later.
+The optional `WSDOT_ACCESS_CODE` can be added later. The beta currently uses direct links—not an API feed—for official NPS conditions and road status.
 
 ## Google Routes configuration
 
@@ -57,6 +60,7 @@ Check:
 ```text
 /
 /privacy.html
+/admin-feedback.html
 /api/v1/health
 /api/v1/entrances/current
 /api/v1/conditions
@@ -70,7 +74,7 @@ During daytime polling, `/api/v1/health` should show:
 - `consecutiveFailedCycles: 0`
 - a non-null `lastBackupAt` after the first scheduled backup
 
-The homepage must show `Unavailable` rather than sample numbers whenever no recent observation exists. Confirm that a 31–60 minute observation is labeled stale, and that values disappear after 60 minutes.
+The homepage must show `Unavailable` rather than sample numbers whenever no recent observation exists. Confirm that a 31–60 minute observation is labeled stale, and that values disappear after 60 minutes. Submit one test feedback item, then open `/admin-feedback.html` using `RAINIER_ADMIN_TOKEN`, review it, and download the CSV.
 
 ## Timer validation
 
@@ -101,7 +105,7 @@ A small closed beta can begin before full calibration, but broad public promotio
 - Closed-entrance and seasonal-status overrides
 - Automating the currently manual entrance-status override from an authoritative source
 - External alerting for degraded health or consecutive route failures
-- A public feedback/inaccuracy form
+- Email or external alerting for especially important feedback, if later needed
 - Field-calibrated route geometry and estimator adjustments
 - Optional location verification for community timers
 - A methodology/version history page

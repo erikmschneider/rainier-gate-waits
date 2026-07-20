@@ -16,7 +16,6 @@ Do not deploy this exact SQLite configuration to a serverless function environme
 
 Recommended optional configuration:
 
-- `NPS_API_KEY`
 - `WSDOT_ACCESS_CODE`
 - `POLL_INTERVAL_SECONDS=900`
 - `POLL_START_HOUR_LOCAL=6`
@@ -26,6 +25,9 @@ Recommended optional configuration:
 - `CURRENT_MAX_AGE_MINUTES=30`
 - `STALE_MAX_AGE_MINUTES=60`
 - `RAINIER_BACKUP_DIR=/data/backups`
+- `FEEDBACK_RATE_LIMIT_PER_HOUR=5`
+- `FEEDBACK_IDENTIFIER_RETENTION_DAYS=30`
+- `FEEDBACK_RETENTION_DAYS=365`
 
 ## Traffic-provider controls
 
@@ -52,11 +54,12 @@ The MVP already:
 - Deletes abandoned timers and removes old client/token identifiers automatically
 - Uses hashed client identifiers in application request logs
 
+The beta now includes an administrative feedback review interface at `/admin-feedback.html`. Keep `RAINIER_ADMIN_TOKEN` private and rotate it if exposed.
+
 Still recommended before a broader public launch:
 
 - Reverse-proxy request limits
 - Stronger duplicate and impossible-travel detection
-- An administrative review interface
 
 ## Reliability controls
 

@@ -41,7 +41,7 @@ Returns Nisqually and White River. Important fields:
 
 ### `GET /api/v1/conditions`
 
-Returns active NPS and WSDOT conditions when configured, plus setup or data-availability notices.
+Returns active WSDOT conditions when configured, plus manual entrance-status and traffic-data notices. The beta does not currently ingest an NPS alert feed.
 
 ## Planning template
 
@@ -96,6 +96,53 @@ They are ignored unless `ACCEPT_REPORT_LOCATIONS=true` is explicitly configured.
 ```
 
 The token allows completion after a Wi-Fi/cellular change. Timers shorter than two minutes are retained as low-confidence records and do not influence public estimates. Timers longer than four hours are rejected.
+
+## Beta feedback
+
+### `POST /api/v1/feedback`
+
+Stores either an estimate-accuracy report or general beta feedback in a table separate from community timers. Accuracy submissions require `entrance` and `actualWaitMinutes`. General submissions require a message. Optional email addresses are private and used only for requested follow-up.
+
+Example accuracy submission:
+
+```json
+{
+  "feedbackType": "accuracy",
+  "category": "estimate-accuracy",
+  "entrance": "nisqually",
+  "displayedLowMinutes": 20,
+  "displayedHighMinutes": 30,
+  "displayedObservedAt": "2026-07-20T18:00:00Z",
+  "actualWaitMinutes": 47,
+  "gateArrivalAt": "2026-07-20T18:50:00Z",
+  "message": "Queue began before the route origin.",
+  "contactEmail": "optional@example.com",
+  "pagePath": "/"
+}
+```
+
+Submissions are limited per temporary anonymous client identifier. The hidden `website` field is a honeypot and should remain blank. Feedback never changes the live estimate automatically.
+
+## Private feedback administration
+
+Open `/admin-feedback.html` and enter `RAINIER_ADMIN_TOKEN`, or call the endpoints directly with the token in `X-Admin-Token`.
+
+### `GET /api/v1/admin/feedback`
+
+Optional query parameters: `status`, `limit`, and `offset`. Review statuses are `new`, `reviewed`, `calibration`, `resolved`, and `spam`.
+
+### `POST /api/v1/admin/feedback/:id`
+
+```json
+{
+  "status": "calibration",
+  "resolutionNotes": "Use during route validation."
+}
+```
+
+### `GET /api/v1/admin/feedback.csv`
+
+Downloads all matching feedback as CSV. An optional `status` query filter is supported. Temporary anonymous client identifiers are never included in the admin response or CSV.
 
 ## Manual poll
 

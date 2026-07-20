@@ -37,6 +37,12 @@ services:
         value: 24
       - key: REPORT_IDENTIFIER_RETENTION_DAYS
         value: 60
+      - key: FEEDBACK_RATE_LIMIT_PER_HOUR
+        value: 5
+      - key: FEEDBACK_IDENTIFIER_RETENTION_DAYS
+        value: 30
+      - key: FEEDBACK_RETENTION_DAYS
+        value: 365
       - key: RAINIER_BACKUP_DIR
         value: /data/backups
       - key: BACKUP_INTERVAL_HOURS
@@ -48,8 +54,6 @@ services:
       - key: RAINIER_ADMIN_TOKEN
         generateValue: true
       - key: GOOGLE_ROUTES_API_KEY
-        sync: false
-      - key: NPS_API_KEY
         sync: false
       - key: WSDOT_ACCESS_CODE
         sync: false

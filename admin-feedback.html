@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>Feedback review · Rainier Gate Waits</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+  <header class="site-header">
+    <div class="shell header-inner">
+      <a class="brand" href="index.html" aria-label="Rainier Gate Waits home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 56 44" role="img">
+            <path d="M4 39 20 16l7 8L35 8l17 31H4Z" fill="currentColor" opacity=".28"/>
+            <path d="m4 39 16-23 7 8L35 8l17 31" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <span><strong>Rainier Gate Waits</strong><small>Private beta administration</small></span>
+      </a>
+      <nav aria-label="Primary navigation"><a href="index.html">Public site</a></nav>
+    </div>
+  </header>
+
+  <main class="admin-main" id="main">
+    <div class="shell">
+      <section class="admin-login" id="admin-login">
+        <p class="eyebrow">Private tool</p>
+        <h1>Feedback review</h1>
+        <p>Enter the value of <code>RAINIER_ADMIN_TOKEN</code> from the Render environment. The token is kept only in this browser tab.</p>
+        <form id="admin-login-form" class="admin-login-form">
+          <label>
+            Admin token
+            <input type="password" id="admin-token" autocomplete="off" required />
+          </label>
+          <button class="button primary" type="submit">Open feedback</button>
+        </form>
+        <p id="admin-login-status" class="form-status" role="status"></p>
+      </section>
+
+      <section id="admin-dashboard" hidden>
+        <div class="admin-heading">
+          <div>
+            <p class="eyebrow">Private beta administration</p>
+            <h1>Feedback submissions</h1>
+            <p id="feedback-count">Loading…</p>
+          </div>
+          <div class="admin-heading-actions">
+            <button class="button secondary" type="button" id="download-feedback">Download CSV</button>
+            <button class="button secondary" type="button" id="admin-logout">Lock dashboard</button>
+          </div>
+        </div>
+
+        <div class="admin-toolbar">
+          <label>
+            Review status
+            <select id="feedback-status-filter">
+              <option value="">All submissions</option>
+              <option value="new">New</option>
+              <option value="reviewed">Reviewed</option>
+              <option value="calibration">Useful for calibration</option>
+              <option value="resolved">Resolved</option>
+              <option value="spam">Spam</option>
+            </select>
+          </label>
+          <button class="button secondary" type="button" id="refresh-feedback">Refresh</button>
+        </div>
+
+        <p id="admin-status" class="form-status" role="status" aria-live="polite"></p>
+        <div id="feedback-list" class="feedback-admin-list"></div>
+      </section>
+    </div>
+  </main>
+
+  <script src="admin-feedback.js"></script>
+</body>
+</html>

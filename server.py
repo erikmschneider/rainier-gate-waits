@@ -2,15 +2,17 @@
 """Rainier Gate Waits local MVP server.
 
 Serves the static prototype, persists traffic snapshots and visitor wait reports in
-SQLite, exposes JSON endpoints, and optionally polls Google Routes, NPS alerts,
-and WSDOT alerts when API keys are configured.
+SQLite, exposes JSON endpoints, and optionally polls Google Routes and WSDOT
+alerts when credentials are configured.
 
 No third-party Python packages are required.
 """
 
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
 import json
 import math
 import mimetypes
@@ -47,7 +49,6 @@ POLL_END_HOUR_LOCAL = max(0, min(23, int(os.environ.get("POLL_END_HOUR_LOCAL", "
 ENABLE_BACKGROUND_POLLING = os.environ.get("ENABLE_BACKGROUND_POLLING", "true").lower() not in {"0", "false", "no"}
 TRUST_PROXY_HEADERS = os.environ.get("TRUST_PROXY_HEADERS", "false").lower() in {"1", "true", "yes"}
 GOOGLE_ROUTES_API_KEY = os.environ.get("GOOGLE_ROUTES_API_KEY", "").strip()
-NPS_API_KEY = os.environ.get("NPS_API_KEY", "").strip()
 WSDOT_ACCESS_CODE = os.environ.get("WSDOT_ACCESS_CODE", "").strip()
 ADMIN_TOKEN = os.environ.get("RAINIER_ADMIN_TOKEN", "").strip()
 HASH_SECRET = os.environ.get("RAINIER_HASH_SECRET", secrets.token_hex(16))
@@ -60,6 +61,10 @@ REPORT_IDENTIFIER_RETENTION_DAYS = max(1, int(os.environ.get("REPORT_IDENTIFIER_
 BACKUP_INTERVAL_HOURS = max(1, int(os.environ.get("BACKUP_INTERVAL_HOURS", "24")))
 BACKUP_RETENTION_COUNT = max(1, int(os.environ.get("BACKUP_RETENTION_COUNT", "7")))
 BACKUP_DIR = Path(os.environ.get("RAINIER_BACKUP_DIR", DB_PATH.parent / "backups"))
+FEEDBACK_RATE_LIMIT_PER_HOUR = max(1, int(os.environ.get("FEEDBACK_RATE_LIMIT_PER_HOUR", "5")))
+FEEDBACK_IDENTIFIER_RETENTION_DAYS = max(1, int(os.environ.get("FEEDBACK_IDENTIFIER_RETENTION_DAYS", "30")))
+FEEDBACK_RETENTION_DAYS = max(FEEDBACK_IDENTIFIER_RETENTION_DAYS, int(os.environ.get("FEEDBACK_RETENTION_DAYS", "365")))
+SITE_VERSION = "0.6.0"
 CLOSED_ENTRANCES = {
     slug.strip().lower()
     for slug in os.environ.get("CLOSED_ENTRANCES", "").split(",")
@@ -174,6 +179,32 @@ create table if not exists wait_reports (
 );
 create index if not exists wait_reports_entrance_completed_idx
   on wait_reports (entrance_slug, completed_at desc);
+
+create table if not exists feedback_submissions (
+  id text primary key,
+  feedback_type text not null,
+  category text not null,
+  entrance_slug text references entrances(slug),
+  displayed_low_minutes integer,
+  displayed_high_minutes integer,
+  displayed_observed_at text,
+  actual_wait_minutes integer,
+  gate_arrival_at text,
+  message text,
+  contact_email text,
+  site_version text not null,
+  page_path text,
+  anonymous_client_hash text,
+  status text not null default 'new',
+  created_at text not null,
+  reviewed_at text,
+  resolution_notes text,
+  updated_at text not null
+);
+create index if not exists feedback_created_idx
+  on feedback_submissions (created_at desc);
+create index if not exists feedback_status_created_idx
+  on feedback_submissions (status, created_at desc);
 
 create table if not exists wait_estimates (
   id integer primary key autoincrement,
@@ -327,7 +358,6 @@ def redact_secrets(text: str, sensitive_values: list[str] | tuple[str, ...] = ()
         value for value in (
             *sensitive_values,
             GOOGLE_ROUTES_API_KEY,
-            NPS_API_KEY,
             WSDOT_ACCESS_CODE,
             ADMIN_TOKEN,
         ) if value and len(value) >= 4
@@ -536,36 +566,6 @@ def upsert_condition(
         )
 
 
-def poll_nps_alerts() -> list[str]:
-    if not NPS_API_KEY:
-        return []
-    try:
-        url = "https://developer.nps.gov/api/v1/alerts?parkCode=mora&limit=50"
-        data = http_json(url, headers={"Authorization": NPS_API_KEY})
-        seen: set[str] = set()
-        for item in data.get("data", []):
-            event_id = str(item.get("id") or hashlib.sha256((item.get("title", "") + item.get("description", "")).encode()).hexdigest()[:24])
-            seen.add(event_id)
-            category = str(item.get("category", "Information"))
-            severity = "warning" if category.lower() in {"danger", "caution", "closure"} else "info"
-            upsert_condition(
-                source="nps", source_event_id=event_id,
-                title=item.get("title") or "Mount Rainier alert",
-                detail=strip_html(item.get("description") or ""),
-                severity=severity, url=item.get("url"), raw_payload=item,
-            )
-        with database() as conn:
-            if seen:
-                placeholders = ",".join("?" for _ in seen)
-                conn.execute(
-                    f"update condition_events set is_active=0 where source='nps' and source_event_id not in ({placeholders})",
-                    tuple(seen),
-                )
-        return []
-    except Exception as exc:
-        return [str(exc)]
-
-
 def poll_wsdot_alerts() -> list[str]:
     if not WSDOT_ACCESS_CODE:
         return []
@@ -609,10 +609,6 @@ def normalize_wsdot_date(value: Any) -> str | None:
     except Exception:
         return None
 
-
-def strip_html(value: str) -> str:
-    text = re.sub(r"<[^>]+>", " ", value)
-    return re.sub(r"\s+", " ", text).strip()
 
 
 def get_recent_snapshots(conn: sqlite3.Connection, slug: str, minutes: int = 90) -> list[sqlite3.Row]:
@@ -832,7 +828,7 @@ def persist_estimate(slug: str, estimate: Estimate) -> None:
                 estimate.confidence_score, estimate.confidence_level,
                 estimate.recent_report_count, estimate.traffic_delay_seconds,
                 estimate.data_mode, json.dumps(estimate.basis, separators=(",", ":")),
-                "beta-heuristic-0.5",
+                "beta-heuristic-0.6",
             ),
         )
 
@@ -855,6 +851,25 @@ def cleanup_old_reports() -> dict[str, int]:
             (iso(), identifier_cutoff),
         ).rowcount
     return {"abandonedDeleted": deleted, "identifiersAnonymized": anonymized}
+
+
+def cleanup_old_feedback() -> dict[str, int]:
+    identifier_cutoff = iso(utc_now() - timedelta(days=FEEDBACK_IDENTIFIER_RETENTION_DAYS))
+    retention_cutoff = iso(utc_now() - timedelta(days=FEEDBACK_RETENTION_DAYS))
+    with database() as conn:
+        anonymized = conn.execute(
+            """
+            update feedback_submissions
+            set anonymous_client_hash=null, updated_at=?
+            where created_at<? and anonymous_client_hash is not null
+            """,
+            (iso(), identifier_cutoff),
+        ).rowcount
+        deleted = conn.execute(
+            "delete from feedback_submissions where created_at<?",
+            (retention_cutoff,),
+        ).rowcount
+    return {"identifiersAnonymized": anonymized, "submissionsDeleted": deleted}
 
 
 def maybe_backup_database() -> dict[str, Any]:
@@ -913,15 +928,15 @@ def poll_all() -> dict[str, Any]:
             errors["google_routes"] = google_errors
     elif ALLOW_SYNTHETIC_DATA:
         seed_demo_snapshots()
-    nps_errors = poll_nps_alerts()
-    if nps_errors:
-        errors["nps"] = nps_errors
     wsdot_errors = poll_wsdot_alerts()
     if wsdot_errors:
         errors["wsdot"] = wsdot_errors
     for slug in ENTRANCES:
         persist_estimate(slug, compute_estimate(slug))
-    cleanup = cleanup_old_reports()
+    cleanup = {
+        "reports": cleanup_old_reports(),
+        "feedback": cleanup_old_feedback(),
+    }
     try:
         backup = maybe_backup_database()
     except Exception as exc:
@@ -1031,6 +1046,8 @@ def health_payload() -> dict[str, Any]:
     database_writable = False
     database_error = None
     recent_report_count = 0
+    recent_feedback_count = 0
+    new_feedback_count = 0
     last_backup_at = None
     entrance_health: dict[str, dict[str, Any]] = {}
     try:
@@ -1043,6 +1060,13 @@ def health_payload() -> dict[str, Any]:
             recent_report_count = conn.execute(
                 "select count(*) as count from wait_reports where completed_at>=?",
                 (iso(now - timedelta(hours=24)),),
+            ).fetchone()["count"]
+            recent_feedback_count = conn.execute(
+                "select count(*) as count from feedback_submissions where created_at>=?",
+                (iso(now - timedelta(hours=24)),),
+            ).fetchone()["count"]
+            new_feedback_count = conn.execute(
+                "select count(*) as count from feedback_submissions where status='new'"
             ).fetchone()["count"]
             backup_row = conn.execute(
                 "select value from service_state where key='last-backup-at'"
@@ -1108,7 +1132,6 @@ def health_payload() -> dict[str, Any]:
         "databaseError": database_error,
         "diskFreeMegabytes": disk_free_mb,
         "googleRoutesConfigured": bool(GOOGLE_ROUTES_API_KEY),
-        "npsConfigured": bool(NPS_API_KEY),
         "wsdotConfigured": bool(WSDOT_ACCESS_CODE),
         "syntheticDataAllowed": ALLOW_SYNTHETIC_DATA,
         "reportLocationsAccepted": ACCEPT_REPORT_LOCATIONS,
@@ -1122,6 +1145,8 @@ def health_payload() -> dict[str, Any]:
         },
         "entrances": entrance_health,
         "completedReportsLast24Hours": recent_report_count,
+        "feedbackSubmissionsLast24Hours": recent_feedback_count,
+        "unreviewedFeedbackSubmissions": new_feedback_count,
         "lastBackupAt": last_backup_at,
         "backupRetentionCount": BACKUP_RETENTION_COUNT,
         "poller": poll_state,
@@ -1134,7 +1159,7 @@ def conditions_payload() -> dict[str, Any]:
         rows = conn.execute(
             """
             select * from condition_events
-            where is_active=1
+            where is_active=1 and source != 'nps'
             order by case severity when 'danger' then 0 when 'warning' then 1 else 2 end,
                      observed_at desc
             limit 20
@@ -1167,16 +1192,6 @@ def conditions_payload() -> dict[str, Any]:
             "tag": "TRAFFIC DATA",
             "title": "Current wait estimates are unavailable",
             "detail": "Google Routes is not configured. The public beta does not substitute synthetic wait values.",
-            "severity": "info",
-            "entrance": None,
-            "url": None,
-            "observedAt": iso(),
-        })
-    if not NPS_API_KEY:
-        alerts.append({
-            "tag": "NPS FEED",
-            "title": "Official park alerts are not connected",
-            "detail": "Add NPS_API_KEY to retrieve Mount Rainier alerts from the NPS API.",
             "severity": "info",
             "entrance": None,
             "url": None,
@@ -1372,6 +1387,225 @@ def complete_report(payload: dict[str, Any], client: str) -> dict[str, Any]:
     }
 
 
+FEEDBACK_TYPES = {"accuracy", "general"}
+FEEDBACK_CATEGORIES = {
+    "estimate-accuracy",
+    "timer-problem",
+    "website-problem",
+    "confusing-information",
+    "feature-suggestion",
+    "other",
+}
+FEEDBACK_STATUSES = {"new", "reviewed", "calibration", "resolved", "spam"}
+EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
+def optional_int(payload: dict[str, Any], key: str, minimum: int, maximum: int) -> int | None:
+    value = payload.get(key)
+    if value is None or value == "":
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{key} must be a whole number") from exc
+    if number < minimum or number > maximum:
+        raise ValueError(f"{key} must be between {minimum} and {maximum}")
+    return number
+
+
+def optional_iso_timestamp(payload: dict[str, Any], key: str) -> str | None:
+    value = str(payload.get(key) or "").strip()
+    if not value:
+        return None
+    try:
+        parsed = parse_iso(value)
+    except ValueError as exc:
+        raise ValueError(f"{key} must be an ISO timestamp") from exc
+    return iso(parsed)
+
+
+def create_feedback(payload: dict[str, Any], client: str) -> dict[str, Any]:
+    # Honeypot submissions receive a normal response but are not stored.
+    if str(payload.get("website") or "").strip():
+        return {"accepted": True, "message": "Thank you for the feedback."}
+
+    feedback_type = str(payload.get("feedbackType") or "general").strip().lower()
+    if feedback_type not in FEEDBACK_TYPES:
+        raise ValueError("feedbackType must be accuracy or general")
+
+    category = str(payload.get("category") or "").strip().lower()
+    if not category:
+        category = "estimate-accuracy" if feedback_type == "accuracy" else "other"
+    if category not in FEEDBACK_CATEGORIES:
+        raise ValueError("Select a valid feedback category")
+
+    entrance = str(payload.get("entrance") or "").strip().lower() or None
+    if entrance and entrance not in ENTRANCES:
+        raise ValueError("Select a valid entrance")
+    if feedback_type == "accuracy" and not entrance:
+        raise ValueError("An entrance is required for an accuracy report")
+
+    displayed_low = optional_int(payload, "displayedLowMinutes", 0, 300)
+    displayed_high = optional_int(payload, "displayedHighMinutes", 0, 300)
+    if displayed_low is not None and displayed_high is not None and displayed_low > displayed_high:
+        raise ValueError("Displayed estimate minimum cannot exceed its maximum")
+    displayed_observed_at = optional_iso_timestamp(payload, "displayedObservedAt")
+    actual_wait = optional_int(payload, "actualWaitMinutes", 0, 300)
+    gate_arrival_at = optional_iso_timestamp(payload, "gateArrivalAt")
+
+    message = str(payload.get("message") or "").strip()
+    if len(message) > 2000:
+        raise ValueError("Feedback details must be 2,000 characters or fewer")
+    if feedback_type == "accuracy" and actual_wait is None:
+        raise ValueError("Enter the actual wait you experienced")
+    if feedback_type == "general" and not message:
+        raise ValueError("Enter a brief description of your feedback")
+
+    email = str(payload.get("contactEmail") or "").strip().lower()
+    if len(email) > 254 or (email and not EMAIL_PATTERN.fullmatch(email)):
+        raise ValueError("Enter a valid email address or leave it blank")
+    email = email or None
+
+    page_path = str(payload.get("pagePath") or "").strip()
+    if len(page_path) > 500:
+        raise ValueError("pagePath is too long")
+    if page_path and not page_path.startswith("/"):
+        page_path = None
+
+    now = iso()
+    with database() as conn:
+        recent_count = conn.execute(
+            "select count(*) as count from feedback_submissions where anonymous_client_hash=? and created_at>=?",
+            (client, iso(utc_now() - timedelta(hours=1))),
+        ).fetchone()["count"]
+        if recent_count >= FEEDBACK_RATE_LIMIT_PER_HOUR:
+            raise PermissionError("Too many feedback submissions from this device; try again later")
+        feedback_id = str(uuid.uuid4())
+        conn.execute(
+            """
+            insert into feedback_submissions (
+              id, feedback_type, category, entrance_slug,
+              displayed_low_minutes, displayed_high_minutes, displayed_observed_at,
+              actual_wait_minutes, gate_arrival_at, message, contact_email,
+              site_version, page_path, anonymous_client_hash, status,
+              created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?)
+            """,
+            (
+                feedback_id, feedback_type, category, entrance,
+                displayed_low, displayed_high, displayed_observed_at,
+                actual_wait, gate_arrival_at, message or None, email,
+                SITE_VERSION, page_path or None, client, now, now,
+            ),
+        )
+    return {
+        "accepted": True,
+        "feedbackId": feedback_id,
+        "message": "Thank you—your feedback was saved for beta review.",
+    }
+
+
+def feedback_admin_payload(status: str | None = None, limit: int = 100, offset: int = 0) -> dict[str, Any]:
+    if status and status not in FEEDBACK_STATUSES:
+        raise ValueError("Invalid feedback status")
+    limit = min(max(int(limit), 1), 250)
+    offset = max(int(offset), 0)
+    where = "where status=?" if status else ""
+    params: list[Any] = [status] if status else []
+    with database() as conn:
+        total = conn.execute(
+            f"select count(*) as count from feedback_submissions {where}", params
+        ).fetchone()["count"]
+        rows = conn.execute(
+            f"""
+            select id, feedback_type, category, entrance_slug,
+                   displayed_low_minutes, displayed_high_minutes, displayed_observed_at,
+                   actual_wait_minutes, gate_arrival_at, message, contact_email,
+                   site_version, page_path, status, created_at, reviewed_at,
+                   resolution_notes, updated_at
+            from feedback_submissions
+            {where}
+            order by created_at desc
+            limit ? offset ?
+            """,
+            [*params, limit, offset],
+        ).fetchall()
+    items = []
+    for row in rows:
+        items.append({
+            "id": row["id"],
+            "feedbackType": row["feedback_type"],
+            "category": row["category"],
+            "entrance": row["entrance_slug"],
+            "displayedLowMinutes": row["displayed_low_minutes"],
+            "displayedHighMinutes": row["displayed_high_minutes"],
+            "displayedObservedAt": row["displayed_observed_at"],
+            "actualWaitMinutes": row["actual_wait_minutes"],
+            "gateArrivalAt": row["gate_arrival_at"],
+            "message": row["message"],
+            "contactEmail": row["contact_email"],
+            "siteVersion": row["site_version"],
+            "pagePath": row["page_path"],
+            "status": row["status"],
+            "createdAt": row["created_at"],
+            "reviewedAt": row["reviewed_at"],
+            "resolutionNotes": row["resolution_notes"],
+            "updatedAt": row["updated_at"],
+        })
+    return {"total": total, "limit": limit, "offset": offset, "submissions": items}
+
+
+def update_feedback(feedback_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    status = str(payload.get("status") or "").strip().lower()
+    if status not in FEEDBACK_STATUSES:
+        raise ValueError("Select a valid review status")
+    notes = str(payload.get("resolutionNotes") or "").strip()
+    if len(notes) > 4000:
+        raise ValueError("Review notes must be 4,000 characters or fewer")
+    now = iso()
+    reviewed_at = now if status != "new" else None
+    with database() as conn:
+        changed = conn.execute(
+            """
+            update feedback_submissions
+            set status=?, resolution_notes=?, reviewed_at=?, updated_at=?
+            where id=?
+            """,
+            (status, notes or None, reviewed_at, now, feedback_id),
+        ).rowcount
+    if not changed:
+        raise KeyError("Feedback submission not found")
+    return {"id": feedback_id, "status": status, "resolutionNotes": notes or None, "updatedAt": now}
+
+
+def feedback_csv_bytes(status: str | None = None) -> bytes:
+    submissions: list[dict[str, Any]] = []
+    offset = 0
+    while True:
+        page = feedback_admin_payload(status=status, limit=250, offset=offset)
+        submissions.extend(page["submissions"])
+        if len(page["submissions"]) < page["limit"]:
+            break
+        offset += page["limit"]
+    output = io.StringIO(newline="")
+    fieldnames = [
+        "id", "createdAt", "status", "feedbackType", "category", "entrance",
+        "displayedLowMinutes", "displayedHighMinutes", "displayedObservedAt",
+        "actualWaitMinutes", "gateArrivalAt", "message", "contactEmail",
+        "siteVersion", "pagePath", "reviewedAt", "resolutionNotes",
+    ]
+    def csv_safe(value: Any) -> Any:
+        if isinstance(value, str) and value.startswith(("=", "+", "-", "@", "\t", "\r")):
+            return "'" + value
+        return value
+
+    writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    for submission in submissions:
+        writer.writerow({key: csv_safe(value) for key, value in submission.items()})
+    return output.getvalue().encode("utf-8-sig")
+
+
 class Poller(threading.Thread):
     daemon = True
 
@@ -1391,7 +1625,7 @@ class Poller(threading.Thread):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "RainierGateWaits/0.5"
+    server_version = "RainierGateWaits/0.6"
 
     def client_ip(self) -> str:
         direct = self.client_address[0]
@@ -1423,6 +1657,26 @@ class Handler(BaseHTTPRequestHandler):
     def send_error_json(self, status: int, message: str) -> None:
         self.send_json({"error": message, "status": status}, status)
 
+    def send_csv(self, body: bytes, filename: str) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/csv; charset=utf-8")
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def require_admin(self) -> bool:
+        if not ADMIN_TOKEN:
+            self.send_error_json(404, "Administrative tools are disabled")
+            return False
+        supplied = self.headers.get("X-Admin-Token", "")
+        if not supplied or not secrets.compare_digest(supplied, ADMIN_TOKEN):
+            self.send_error_json(403, "Invalid admin token")
+            return False
+        return True
+
     def read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
         if length <= 0 or length > 65536:
@@ -1450,6 +1704,20 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/api/v1/conditions":
                 self.send_json(conditions_payload())
+                return
+            if path == "/api/v1/admin/feedback":
+                if not self.require_admin():
+                    return
+                status_filter = first(query, "status")
+                limit = int(first(query, "limit") or "100")
+                offset = int(first(query, "offset") or "0")
+                self.send_json(feedback_admin_payload(status_filter, limit, offset))
+                return
+            if path == "/api/v1/admin/feedback.csv":
+                if not self.require_admin():
+                    return
+                status_filter = first(query, "status")
+                self.send_csv(feedback_csv_bytes(status_filter), "rainier-gate-waits-feedback.csv")
                 return
             match = re.fullmatch(r"/api/v1/entrances/([a-z0-9-]+)/forecast", path)
             if match:
@@ -1483,12 +1751,17 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/v1/reports/complete":
                 self.send_json(complete_report(payload, client))
                 return
-            if parsed.path == "/api/v1/admin/poll":
-                if not ADMIN_TOKEN:
-                    self.send_error_json(404, "Manual polling is disabled")
+            if parsed.path == "/api/v1/feedback":
+                self.send_json(create_feedback(payload, client), 201)
+                return
+            feedback_match = re.fullmatch(r"/api/v1/admin/feedback/([0-9a-fA-F-]{36})", parsed.path)
+            if feedback_match:
+                if not self.require_admin():
                     return
-                if self.headers.get("X-Admin-Token") != ADMIN_TOKEN:
-                    self.send_error_json(403, "Invalid admin token")
+                self.send_json(update_feedback(feedback_match.group(1), payload))
+                return
+            if parsed.path == "/api/v1/admin/poll":
+                if not self.require_admin():
                     return
                 self.send_json(poll_all())
                 return
@@ -1531,6 +1804,7 @@ def first(query: dict[str, list[str]], key: str) -> str | None:
 def main() -> None:
     initialize_database()
     cleanup_old_reports()
+    cleanup_old_feedback()
     try:
         maybe_backup_database()
     except Exception as exc:
