@@ -108,4 +108,4 @@ A small closed beta can begin before full calibration, but broad public promotio
 - Email or external alerting for especially important feedback, if later needed
 - Field-calibrated route geometry and estimator adjustments
 - Optional location verification for community timers
-- A methodology/version history page
+- A public version history or change log beyond the current methodology-page version label

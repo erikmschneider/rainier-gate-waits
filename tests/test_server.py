@@ -218,6 +218,21 @@ class ServerTests(unittest.TestCase):
         filtered = server.feedback_admin_payload("calibration")
         self.assertEqual(filtered["total"], 1)
 
+    def test_methodology_feedback_is_accepted(self):
+        result = server.create_feedback(
+            {
+                "feedbackType": "general",
+                "category": "methodology",
+                "message": "Consider lowering report influence until field calibration is complete.",
+                "pagePath": "/methodology.html",
+            },
+            "methodology-feedback-client",
+        )
+        self.assertTrue(result["accepted"])
+        item = server.feedback_admin_payload()["submissions"][0]
+        self.assertEqual(item["category"], "methodology")
+        self.assertEqual(item["pagePath"], "/methodology.html")
+
     def test_general_feedback_requires_details(self):
         with self.assertRaises(ValueError):
             server.create_feedback(

@@ -444,7 +444,7 @@ function feedbackEstimateText(entrance) {
   return `${waitLabel(entrance)} minutes · ${freshnessLabel(entrance)}`;
 }
 
-function setFeedbackMode(type, entranceId = "") {
+function setFeedbackMode(type, entranceId = "", preselectedCategory = "") {
   const form = document.querySelector("#feedback-form");
   const accuracyFields = document.querySelector("#feedback-accuracy-fields");
   const entrance = entranceId ? entrances[entranceId] || unavailableEntrances[entranceId] : null;
@@ -462,6 +462,7 @@ function setFeedbackMode(type, entranceId = "") {
     form.elements.category.value = "estimate-accuracy";
     form.elements.actualWaitMinutes.required = true;
     form.elements.message.required = false;
+    form.elements.message.placeholder = "Where did the queue begin, and how did the displayed estimate differ from your experience?";
     form.elements.displayedLowMinutes.value = Number.isFinite(entrance?.min) ? entrance.min : "";
     form.elements.displayedHighMinutes.value = Number.isFinite(entrance?.max) ? entrance.max : "";
     form.elements.displayedObservedAt.value = entrance?.observedAt || "";
@@ -477,11 +478,19 @@ function setFeedbackMode(type, entranceId = "") {
     form.elements.displayedLowMinutes.value = "";
     form.elements.displayedHighMinutes.value = "";
     form.elements.displayedObservedAt.value = "";
+    if (preselectedCategory === "methodology") {
+      document.querySelector("#feedback-dialog-title").textContent = "Comment on the methodology";
+      document.querySelector("#feedback-dialog-intro").textContent = "Share concerns, suggested changes, or questions about the estimate calculation, weighting, uncertainty range, or known limitations.";
+      form.elements.category.value = "methodology";
+      form.elements.message.placeholder = "Which assumption or part of the calculation should be reconsidered, and why?";
+    } else {
+      form.elements.message.placeholder = "What happened, or what should be improved?";
+    }
   }
 }
 
-function openFeedback(type, entranceId = "") {
-  setFeedbackMode(type, entranceId);
+function openFeedback(type, entranceId = "", preselectedCategory = "") {
+  setFeedbackMode(type, entranceId, preselectedCategory);
   const dialog = document.querySelector("#feedback-dialog");
   if (typeof dialog.showModal === "function") {
     dialog.showModal();
@@ -566,11 +575,17 @@ async function initialize() {
     if (button) openFeedback("accuracy", button.dataset.feedbackEntrance);
   });
   document.querySelector("#general-feedback-link").addEventListener("click", () => openFeedback("general"));
+  document.querySelector("#methodology-feedback-link").addEventListener("click", () => openFeedback("general", "", "methodology"));
   document.querySelector("#feedback-form").addEventListener("submit", submitFeedback);
   document.querySelectorAll("[data-close-feedback]").forEach((button) => button.addEventListener("click", closeFeedback));
   document.querySelector("#feedback-dialog").addEventListener("click", (event) => {
     if (event.target === event.currentTarget) closeFeedback();
   });
+
+  const requestedFeedback = new URLSearchParams(window.location.search).get("feedback");
+  if (requestedFeedback === "methodology") {
+    openFeedback("general", "", "methodology");
+  }
 
   window.setInterval(() => {
     loadCurrentData();

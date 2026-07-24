@@ -89,4 +89,13 @@ Use `CLOSED_ENTRANCES=white-river` when White River should be manually suppresse
 - Added review statuses, private notes, filtering, and CSV export.
 - Added feedback retention controls and privacy-notice language.
 - Added health metrics for recent and unreviewed feedback.
-- Expanded the backend suite to 18 tests.
+- Expanded the backend suite to 19 tests.
+
+## v0.6.1 methodology transparency
+
+- Added a public `methodology.html` page with the exact current calculation, freshness rules, uncertainty logic, confidence caveats, planning-chart multipliers, and known limitations.
+- Added homepage and footer links to the complete methodology.
+- Added a shareable copy-link control.
+- Added a methodology-specific feedback category throughout the public form, backend, private dashboard, and CSV export.
+- Methodology feedback remains separate from community timers and does not automatically affect estimates.
+- The estimator itself remains `beta-heuristic-0.6`.

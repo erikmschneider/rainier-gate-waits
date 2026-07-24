@@ -117,3 +117,9 @@ The planning chart is a preliminary seasonal template. It is not a prediction fr
 Open `/admin-feedback.html` on the deployed site and enter the `RAINIER_ADMIN_TOKEN` value from Render. The token is stored only in the current browser tab. The dashboard can filter submissions, mark them reviewed or useful for calibration, add private notes, and download CSV.
 
 Feedback records live in the same persistent SQLite database and are included in the rotating backups. They never influence wait estimates automatically.
+
+- Public `methodology.html` page documenting the calculation and known limitations.
+
+## Public methodology
+
+The calculation is documented at `/methodology.html`. Visitors can submit calculation-specific comments through the existing private feedback workflow. The page documents model version `beta-heuristic-0.6`; the documentation/site release is v0.6.1.

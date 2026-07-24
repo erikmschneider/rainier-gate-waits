@@ -28,7 +28,7 @@
         <a href="#current">Current waits</a>
         <a href="#plan">Plan a visit</a>
         <a href="#report">Report a wait</a>
-        <a href="#method">How it works</a>
+        <a href="methodology.html">How estimates work</a>
         <a href="privacy.html">Privacy</a>
       </nav>
     </div>
@@ -229,7 +229,10 @@
             <p class="eyebrow">Transparent by design</p>
             <h2>How the estimate is built</h2>
           </div>
-          <p class="section-intro">Every estimate should show its age, contributing signals, and confidence—not just a single number.</p>
+          <div class="method-heading-actions">
+            <p class="section-intro">Every estimate should show its age, contributing signals, and confidence—not just a single number.</p>
+            <a class="button methodology-button" href="methodology.html">Review the complete methodology</a>
+          </div>
         </div>
 
         <div class="method-grid">
@@ -255,6 +258,14 @@
           </article>
         </div>
 
+        <div class="method-feedback-callout">
+          <div>
+            <strong>Questions or concerns about the calculation?</strong>
+            <span>Review the full methodology and submit comments specifically about its assumptions, weights, or limitations.</span>
+          </div>
+          <button class="button methodology-feedback-button" type="button" id="methodology-feedback-link">Comment on the methodology</button>
+        </div>
+
         <div class="source-strip">
           <span>Current and planned inputs</span>
           <ul>
@@ -275,7 +286,7 @@
         <strong>Rainier Gate Waits</strong>
         <p>Independent public beta. Not affiliated with or endorsed by the National Park Service.</p>
       </div>
-      <p><button class="footer-link-button" type="button" id="general-feedback-link">Send beta feedback</button> · <a href="privacy.html">Privacy</a> · <a href="/api/v1/health">System health</a></p>
+      <p><button class="footer-link-button" type="button" id="general-feedback-link">Send beta feedback</button> · <a href="methodology.html">How estimates work</a> · <a href="privacy.html">Privacy</a> · <a href="/api/v1/health">System health</a></p>
     </div>
   </footer>
 
@@ -306,6 +317,7 @@
             <option value="website-problem">Website problem</option>
             <option value="confusing-information">Confusing information</option>
             <option value="feature-suggestion">Feature suggestion</option>
+            <option value="methodology">Methodology or calculation</option>
             <option value="other">Other</option>
           </select>
         </label>

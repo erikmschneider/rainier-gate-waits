@@ -420,3 +420,65 @@ footer { padding-block: 38px; background: #08261e; color: white; border-top: 1px
   .admin-toolbar { display: grid; }
   .admin-toolbar label { min-width: 0; }
 }
+
+
+/* Calculation methodology */
+.method-heading-actions { display: grid; justify-items: start; gap: 18px; max-width: 520px; }
+.methodology-button, .methodology-feedback-button {
+  min-height: 44px;
+  border-color: rgba(255,255,255,.3);
+  background: rgba(255,255,255,.08);
+  color: white;
+}
+.methodology-button:hover, .methodology-feedback-button:hover { background: rgba(255,255,255,.14); }
+.method-feedback-callout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 26px;
+  padding: 22px 24px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 16px;
+  background: rgba(255,255,255,.055);
+}
+.method-feedback-callout > div { display: grid; gap: 5px; }
+.method-feedback-callout span { max-width: 700px; color: rgba(255,255,255,.68); font-size: .84rem; }
+
+.methodology-main { min-height: calc(100vh - 80px); background: var(--cream); padding: 64px 0 90px; }
+.methodology-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 34px; align-items: start; }
+.methodology-card { padding: clamp(28px, 5vw, 56px); background: white; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+.methodology-card h1 { color: var(--ink); font-size: clamp(2.7rem, 6vw, 5rem); }
+.methodology-card h2 { margin-top: 2.6rem; font-family: inherit; font-size: 1.45rem; font-weight: 850; letter-spacing: -.015em; }
+.methodology-card h3 { margin-top: 1.7rem; font-size: 1.05rem; }
+.methodology-card p, .methodology-card li { color: var(--ink-soft); }
+.methodology-card ul, .methodology-card ol { padding-left: 1.25rem; }
+.methodology-card li + li { margin-top: .45rem; }
+.methodology-lead { max-width: 760px; font-size: 1.08rem; }
+.methodology-meta { display: flex; flex-wrap: wrap; gap: 8px; margin: 22px 0 30px; }
+.methodology-meta span { border-radius: 999px; padding: 6px 10px; background: var(--green-soft); color: var(--forest); font-size: .72rem; font-weight: 800; }
+.formula-card { margin: 18px 0; padding: 20px; border-left: 4px solid var(--green); border-radius: 8px 14px 14px 8px; background: var(--cream); }
+.formula-card strong { display: block; margin-bottom: 8px; }
+.formula-card code { display: block; overflow-wrap: anywhere; color: var(--forest-dark); font-size: .92rem; line-height: 1.65; }
+.method-table-wrap { overflow-x: auto; margin: 18px 0; }
+.method-table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+.method-table th, .method-table td { padding: 12px 13px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+.method-table th { background: var(--cream); color: var(--ink); }
+.method-note { padding: 18px 20px; border-radius: 14px; background: var(--blue-soft); }
+.method-warning { padding: 18px 20px; border-radius: 14px; background: var(--amber-soft); }
+.methodology-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 30px; }
+.methodology-actions .button.secondary { border-color: var(--line); color: var(--forest); background: white; }
+.methodology-sidebar { position: sticky; top: 100px; display: grid; gap: 18px; }
+.methodology-sidebar-card { padding: 22px; background: white; border: 1px solid var(--line); border-radius: 16px; }
+.methodology-sidebar-card strong { display: block; margin-bottom: 10px; }
+.methodology-sidebar-card a { display: block; margin-top: 8px; color: var(--forest); font-size: .84rem; font-weight: 750; }
+.copy-status { min-height: 1.3em; margin: 8px 0 0; color: var(--green); font-size: .76rem; font-weight: 700; }
+@media (max-width: 860px) {
+  .method-feedback-callout { display: grid; }
+  .methodology-layout { grid-template-columns: 1fr; }
+  .methodology-sidebar { position: static; grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 620px) {
+  .methodology-sidebar { grid-template-columns: 1fr; }
+  .methodology-actions { display: grid; }
+}

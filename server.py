@@ -64,7 +64,7 @@ BACKUP_DIR = Path(os.environ.get("RAINIER_BACKUP_DIR", DB_PATH.parent / "backups
 FEEDBACK_RATE_LIMIT_PER_HOUR = max(1, int(os.environ.get("FEEDBACK_RATE_LIMIT_PER_HOUR", "5")))
 FEEDBACK_IDENTIFIER_RETENTION_DAYS = max(1, int(os.environ.get("FEEDBACK_IDENTIFIER_RETENTION_DAYS", "30")))
 FEEDBACK_RETENTION_DAYS = max(FEEDBACK_IDENTIFIER_RETENTION_DAYS, int(os.environ.get("FEEDBACK_RETENTION_DAYS", "365")))
-SITE_VERSION = "0.6.0"
+SITE_VERSION = "0.6.1"
 CLOSED_ENTRANCES = {
     slug.strip().lower()
     for slug in os.environ.get("CLOSED_ENTRANCES", "").split(",")
@@ -1394,6 +1394,7 @@ FEEDBACK_CATEGORIES = {
     "website-problem",
     "confusing-information",
     "feature-suggestion",
+    "methodology",
     "other",
 }
 FEEDBACK_STATUSES = {"new", "reviewed", "calibration", "resolved", "spam"}
@@ -1625,7 +1626,7 @@ class Poller(threading.Thread):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "RainierGateWaits/0.6"
+    server_version = "RainierGateWaits/0.6.1"
 
     def client_ip(self) -> str:
         direct = self.client_address[0]

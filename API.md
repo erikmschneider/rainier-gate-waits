@@ -101,7 +101,7 @@ The token allows completion after a Wi-Fi/cellular change. Timers shorter than t
 
 ### `POST /api/v1/feedback`
 
-Stores either an estimate-accuracy report or general beta feedback in a table separate from community timers. Accuracy submissions require `entrance` and `actualWaitMinutes`. General submissions require a message. Optional email addresses are private and used only for requested follow-up.
+Stores estimate-accuracy reports, methodology comments, and general beta feedback in a table separate from community timers. Accuracy submissions require `entrance` and `actualWaitMinutes`. General and methodology submissions require a message. Optional email addresses are private and used only for requested follow-up. Supported categories include `estimate-accuracy`, `timer-problem`, `website-problem`, `confusing-information`, `feature-suggestion`, `methodology`, and `other`.
 
 Example accuracy submission:
 
@@ -121,7 +121,7 @@ Example accuracy submission:
 }
 ```
 
-Submissions are limited per temporary anonymous client identifier. The hidden `website` field is a honeypot and should remain blank. Feedback never changes the live estimate automatically.
+Submissions are limited per temporary anonymous client identifier. The hidden `website` field is a honeypot and should remain blank. Feedback never changes the live estimate automatically. The public methodology page links to this endpoint with the `methodology` category preselected.
 
 ## Private feedback administration
 

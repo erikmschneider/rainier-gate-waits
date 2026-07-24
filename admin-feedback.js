@@ -46,6 +46,7 @@ function categoryLabel(value) {
     "website-problem": "Website problem",
     "confusing-information": "Confusing information",
     "feature-suggestion": "Feature suggestion",
+    methodology: "Methodology or calculation",
     other: "Other"
   }[value] || value;
 }

@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="How Rainier Gate Waits calculates experimental entrance-delay estimates and planning patterns." />
+  <title>How estimates work · Rainier Gate Waits</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <header class="site-header">
+    <div class="shell header-inner">
+      <a class="brand" href="index.html" aria-label="Rainier Gate Waits home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 56 44" role="img">
+            <path d="M4 39 20 16l7 8L35 8l17 31H4Z" fill="currentColor" opacity=".28"/>
+            <path d="m4 39 16-23 7 8L35 8l17 31" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <span>
+          <strong>Rainier Gate Waits</strong>
+          <small>Independent public beta</small>
+        </span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="index.html#current">Current waits</a>
+        <a href="index.html#report">Report a wait</a>
+        <a href="privacy.html">Privacy</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="methodology-main" id="main">
+    <div class="shell methodology-layout">
+      <article class="methodology-card">
+        <p class="eyebrow">Transparent by design</p>
+        <h1>How estimates work</h1>
+        <p class="methodology-lead">Rainier Gate Waits is an experimental, independent service. It estimates entrance delay by comparing current traffic travel time with normal travel time on a fixed approach segment, then optionally adjusting that baseline with recent community wait timers.</p>
+
+        <div class="methodology-meta">
+          <span>Model: beta-heuristic-0.6</span>
+          <span>Last updated: July 24, 2026</span>
+          <span>Applies to Nisqually and White River</span>
+        </div>
+
+        <div class="method-warning">
+          <strong>Important limitation:</strong> traffic delay on an approach road is not the same thing as a direct measurement of the entrance-booth line. The route segments and weighting rules still require field calibration.
+        </div>
+
+        <h2 id="summary">Plain-language summary</h2>
+        <ol>
+          <li>The service checks the traffic-aware and normal travel times on a fixed road segment approaching each entrance.</li>
+          <li>The difference between those travel times becomes the baseline delay.</li>
+          <li>Recent visitor timers can adjust that baseline, but cannot create an estimate when recent traffic data is unavailable.</li>
+          <li>The service widens the displayed range when reports disagree or the traffic observation is aging.</li>
+          <li>Old observations are labeled stale and then hidden.</li>
+        </ol>
+
+        <h2 id="traffic-baseline">1. Traffic-delay baseline</h2>
+        <p>For each entrance, the service requests a current traffic-adjusted travel time and a normal travel time for a fixed approach route. It calculates the baseline as:</p>
+        <div class="formula-card">
+          <strong>Baseline traffic delay</strong>
+          <code>maximum of 0 and (traffic-adjusted travel time − normal travel time)</code>
+        </div>
+        <p>Example: if an approach normally takes 12 minutes but currently takes 32 minutes, the baseline delay is 20 minutes.</p>
+        <p>This calculation assumes that most unusual delay on the selected segment is related to the entrance queue. Construction, collisions, roadside activity, weather, or congestion unrelated to the gate can violate that assumption.</p>
+
+        <h2 id="community-timers">2. Qualifying community timers</h2>
+        <p>A community timer can be considered only when it:</p>
+        <ul>
+          <li>Runs for at least 2 minutes and no more than 3 hours.</li>
+          <li>Was completed during the previous 60 minutes.</li>
+          <li>Meets the current quality threshold.</li>
+          <li>Is not an additional recent submission from the same anonymous client.</li>
+        </ul>
+        <p>The estimator considers no more than 30 recent reports per entrance. Reported locations are not currently required or used by default.</p>
+
+        <h3>Recency weighting</h3>
+        <p>The community signal is a weighted median, which is less sensitive to a single extreme report than an average. Newer reports count more:</p>
+        <div class="method-table-wrap">
+          <table class="method-table">
+            <thead><tr><th>Age of completed timer</th><th>Weight in community median</th></tr></thead>
+            <tbody>
+              <tr><td>0–15 minutes</td><td>1.00</td></tr>
+              <tr><td>16–30 minutes</td><td>0.75</td></tr>
+              <tr><td>31–45 minutes</td><td>0.50</td></tr>
+              <tr><td>46–60 minutes</td><td>0.25</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="blending">3. Blending traffic and community data</h2>
+        <p>Let <strong>G</strong> be the traffic-delay baseline and <strong>R</strong> be the recency-weighted median community timer.</p>
+        <div class="method-table-wrap">
+          <table class="method-table">
+            <thead><tr><th>Distinct recent timers</th><th>Center of estimate</th></tr></thead>
+            <tbody>
+              <tr><td>None</td><td>100% traffic delay</td></tr>
+              <tr><td>1–2</td><td>70% traffic delay + 30% community median</td></tr>
+              <tr><td>3 or more</td><td>50% traffic delay + 50% community median</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="formula-card">
+          <strong>Current blending rules</strong>
+          <code>No reports: C = G<br />1–2 reports: C = 0.70G + 0.30R<br />3+ reports: C = 0.50G + 0.50R</code>
+        </div>
+        <p>Community reports never create a public wait estimate by themselves. A recent usable traffic observation is always required.</p>
+
+        <h2 id="uncertainty">4. Building the displayed range</h2>
+        <p>The blended center is surrounded by an uncertainty spread:</p>
+        <div class="method-table-wrap">
+          <table class="method-table">
+            <thead><tr><th>Available community reports</th><th>Starting spread around center</th></tr></thead>
+            <tbody>
+              <tr><td>None</td><td>±8 minutes</td></tr>
+              <tr><td>1–2</td><td>±6 minutes</td></tr>
+              <tr><td>3 or more</td><td>±4 minutes</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>The spread is widened when two or more community timers disagree. It also expands when the traffic observation is more than 10 minutes old. Each of those additions is capped at 12 minutes.</p>
+        <p>The lower bound is rounded down and the upper bound is rounded up to the nearest five minutes. This is why a calculated center of 26 minutes might appear as a range such as 20–35 minutes.</p>
+
+        <h2 id="freshness">5. Freshness and availability</h2>
+        <div class="method-table-wrap">
+          <table class="method-table">
+            <thead><tr><th>Observation age or status</th><th>Public treatment</th></tr></thead>
+            <tbody>
+              <tr><td>0–30 minutes during polling hours</td><td>Current</td></tr>
+              <tr><td>31–60 minutes during polling hours</td><td>Stale warning</td></tr>
+              <tr><td>More than 60 minutes</td><td>Estimate hidden as unavailable</td></tr>
+              <tr><td>Outside daytime polling hours</td><td>Shown as the last daytime observation only while within the age limit</td></tr>
+              <tr><td>Entrance manually marked closed</td><td>Wait estimate suppressed</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>The public deployment does not substitute plausible sample wait numbers when live observations are unavailable.</p>
+
+        <h2 id="confidence">6. Confidence and trend labels</h2>
+        <p>The confidence score describes the available supporting information; it does not alter the displayed wait. It considers traffic-data freshness, report count, agreement among reports, and the amount of recent traffic history.</p>
+        <p>The current score also includes a temporary fixed incident component. Because incident-overlap logic is not yet spatially validated, confidence labels should still be treated as experimental.</p>
+        <p>The trend label compares the newest traffic delays with older recent traffic delays. A change of at least five minutes is labeled rising or falling; smaller changes are labeled stable.</p>
+
+        <h2 id="planning-chart">7. The planning chart is separate</h2>
+        <p>The hourly planning chart is not a live forecast and does not use the current wait calculation. It starts with manually defined seasonal templates and applies broad multipliers:</p>
+        <ul>
+          <li>Weekday: 62% of the base pattern.</li>
+          <li>Weekend: 100% of the base pattern.</li>
+          <li>Holiday weekend: 125% of the base pattern.</li>
+          <li>May through September: full seasonal pattern.</li>
+          <li>Other months: 35% of the seasonal pattern.</li>
+        </ul>
+        <div class="method-note"><strong>Interpretation:</strong> use the chart as an experimental typical congestion pattern, not as a prediction of conditions for a specific day.</div>
+
+        <h2 id="limitations">Known limitations and open questions</h2>
+        <ul>
+          <li>The fixed route may not extend far enough to capture the back of a very long queue.</li>
+          <li>Traffic delay may include congestion unrelated to the entrance booths.</li>
+          <li>The relationship between traffic delay and booth wait may differ between Nisqually and White River.</li>
+          <li>Community timers are not yet location-verified.</li>
+          <li>The current blending percentages have not been calibrated against a large field dataset.</li>
+          <li>The uncertainty formula is a beta heuristic, not a statistical confidence interval.</li>
+          <li>Staffing, payment methods, closures, weather, construction, and unusual events may cause abrupt errors.</li>
+          <li>The planning chart requires historical calibration before it should be described as a forecast.</li>
+        </ul>
+
+        <h2 id="feedback-use">How feedback will be used</h2>
+        <p>Methodology feedback is stored privately and reviewed separately from community timers. It does not automatically change a live estimate. Useful comments may inform future route changes, weighting adjustments, uncertainty rules, field-validation priorities, or documentation revisions.</p>
+        <p>Especially helpful feedback identifies a specific assumption, explains why it may be wrong, and—when possible—provides an example or an alternative calculation.</p>
+
+        <div class="methodology-actions">
+          <a class="button primary" href="index.html?feedback=methodology#method">Comment on the methodology</a>
+          <a class="button secondary" href="index.html#current">Return to current waits</a>
+        </div>
+      </article>
+
+      <aside class="methodology-sidebar" aria-label="Methodology navigation and sharing">
+        <div class="methodology-sidebar-card">
+          <strong>On this page</strong>
+          <a href="#summary">Overview</a>
+          <a href="#traffic-baseline">Traffic baseline</a>
+          <a href="#community-timers">Community timers</a>
+          <a href="#blending">Blending and uncertainty</a>
+          <a href="#freshness">Freshness and confidence</a>
+          <a href="#planning-chart">Planning chart</a>
+          <a href="#limitations">Known limitations</a>
+        </div>
+        <div class="methodology-sidebar-card">
+          <strong>Invite review</strong>
+          <p>Share this page with local visitors, transportation specialists, data reviewers, or park-access experts.</p>
+          <button class="button secondary" type="button" id="copy-methodology-link">Copy page link</button>
+          <p class="copy-status" id="copy-methodology-status" role="status" aria-live="polite"></p>
+        </div>
+        <div class="methodology-sidebar-card">
+          <strong>Related pages</strong>
+          <a href="privacy.html">Privacy notice</a>
+          <a href="/api/v1/health">System health</a>
+          <a href="index.html?feedback=methodology#method">Submit methodology feedback</a>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <footer>
+    <div class="shell footer-inner">
+      <div>
+        <strong>Rainier Gate Waits</strong>
+        <p>Independent public beta. Not affiliated with or endorsed by the National Park Service.</p>
+      </div>
+      <p><a href="index.html">Home</a> · <a href="privacy.html">Privacy</a> · <a href="index.html?feedback=methodology#method">Comment on methodology</a></p>
+    </div>
+  </footer>
+
+  <script>
+    const copyButton = document.querySelector("#copy-methodology-link");
+    const copyStatus = document.querySelector("#copy-methodology-status");
+    copyButton.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(window.location.href);
+        copyStatus.textContent = "Methodology link copied.";
+      } catch {
+        const temporary = document.createElement("textarea");
+        temporary.value = window.location.href;
+        temporary.setAttribute("readonly", "");
+        temporary.style.position = "fixed";
+        temporary.style.opacity = "0";
+        document.body.appendChild(temporary);
+        temporary.select();
+        document.execCommand("copy");
+        temporary.remove();
+        copyStatus.textContent = "Methodology link copied.";
+      }
+    });
+  </script>
+</body>
+</html>
