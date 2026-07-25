@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="How Rainier Gate Waits calculates experimental entrance-delay estimates and planning patterns." />
   <title>How estimates work · Rainier Gate Waits</title>
+  <meta name="theme-color" content="#1d3b2a" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -139,10 +141,15 @@
         </div>
         <p>The public deployment does not substitute plausible sample wait numbers when live observations are unavailable.</p>
 
-        <h2 id="confidence">6. Confidence and trend labels</h2>
-        <p>The confidence score describes the available supporting information; it does not alter the displayed wait. It considers traffic-data freshness, report count, agreement among reports, and the amount of recent traffic history.</p>
-        <p>The current score also includes a temporary fixed incident component. Because incident-overlap logic is not yet spatially validated, confidence labels should still be treated as experimental.</p>
+        <h2 id="confidence">6. Signal strength and trend labels</h2>
+        <p>The site publishes a <strong>signal strength</strong> band rather than a confidence level, because the underlying score measures how much usable input the estimator had—not how accurate the resulting range turned out to be. It considers traffic-data freshness, report count, agreement among reports, and the amount of recent traffic history.</p>
+        <p>The score also includes a temporary fixed incident component, because incident-overlap logic is not yet spatially validated.</p>
+        <div class="method-note"><strong>Published ceiling:</strong> until the approach geometry has been checked against paired field observations at both entrances, the published band is capped at <em>Medium</em> even when the raw score reaches the top range. A model that has never been compared with a measured gate wait has not earned the word "high."</div>
         <p>The trend label compares the newest traffic delays with older recent traffic delays. A change of at least five minutes is labeled rising or falling; smaller changes are labeled stable.</p>
+
+        <h2 id="outliers">6b. Community reports that disagree with the traffic signal</h2>
+        <p>Because community timers can carry up to half the weight of a published estimate, a single mistimed or deliberately false report should not be able to move the number. A completed report is used only when it lands within three times the measured traffic delay, with a ten-minute absolute allowance so that low-delay conditions still admit ordinary booth-processing time.</p>
+        <p>Reports outside that range are excluded from the calculation, but they are not ignored. Two or more reports far above what the route segment can explain is the signature of a queue that begins upstream of the fixed route origin—the estimator's principal blind spot. When that pattern appears, the signal strength score is reduced and the condition is recorded in the estimate basis for review during field calibration.</p>
 
         <h2 id="planning-chart">7. The planning chart is separate</h2>
         <p>The hourly planning chart is not a live forecast and does not use the current wait calculation. It starts with manually defined seasonal templates and applies broad multipliers:</p>
@@ -163,6 +170,7 @@
           <li>Community timers are not yet location-verified.</li>
           <li>The current blending percentages have not been calibrated against a large field dataset.</li>
           <li>The uncertainty formula is a beta heuristic, not a statistical confidence interval.</li>
+          <li>Excluding reports that disagree strongly with the traffic signal also suppresses the correct reading in the one case the traffic signal handles worst: a queue extending past the route origin. The exclusion is recorded rather than silent, but until the route is field-validated this remains an unresolved trade-off.</li>
           <li>Staffing, payment methods, closures, weather, construction, and unusual events may cause abrupt errors.</li>
           <li>The planning chart requires historical calibration before it should be described as a forecast.</li>
         </ul>
@@ -214,26 +222,6 @@
     </div>
   </footer>
 
-  <script>
-    const copyButton = document.querySelector("#copy-methodology-link");
-    const copyStatus = document.querySelector("#copy-methodology-status");
-    copyButton.addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(window.location.href);
-        copyStatus.textContent = "Methodology link copied.";
-      } catch {
-        const temporary = document.createElement("textarea");
-        temporary.value = window.location.href;
-        temporary.setAttribute("readonly", "");
-        temporary.style.position = "fixed";
-        temporary.style.opacity = "0";
-        document.body.appendChild(temporary);
-        temporary.select();
-        document.execCommand("copy");
-        temporary.remove();
-        copyStatus.textContent = "Methodology link copied.";
-      }
-    });
-  </script>
+  <script src="methodology.js"></script>
 </body>
 </html>

@@ -6,7 +6,7 @@ All endpoints are served from the same origin as the website. JSON responses use
 
 ### `GET /api/v1/health`
 
-Returns process, storage, polling, backup, and per-entrance data freshness information. Important fields include:
+Without an administrator token the response is limited to `status`, `version`, polling window, freshness thresholds, closed entrances, and per-entrance freshness. Send `X-Admin-Token` for the full operational payload described below.
 
 - `status` — `ok`, `degraded`, or `error`
 - `databaseWritable`
@@ -66,9 +66,12 @@ Returns up to seven days of archived approach observations.
 
 ```json
 {
-  "entrance": "nisqually"
+  "entrance": "nisqually",
+  "deviceId": "random value generated and stored by the browser"
 }
 ```
+
+`deviceId` is optional but strongly recommended. The server stores only a one-way hash of it and uses it for the per-browser report limit (`DEVICE_REPORT_LIMIT_PER_HOUR`, default 5) and for estimator deduplication. Requests without it fall back to the strict per-network limit, which is shared by every visitor behind the same carrier address.
 
 Response:
 
@@ -82,6 +85,8 @@ Response:
 ```
 
 The browser must keep `reportToken` private. The server stores only its one-way hash.
+
+A completed report is used in the estimate only when it lands within `REPORT_DIVERGENCE_FACTOR` of the measured traffic delay, allowing `REPORT_DIVERGENCE_FLOOR_MINUTES` in absolute terms. Excluded reports are counted in the estimate `basis`; two or more far above the traffic signal set `possible_queue_beyond_route_origin` and reduce the score.
 
 Optional rounded location fields are supported by the backend, but the current public interface does not request location permission.
 They are ignored unless `ACCEPT_REPORT_LOCATIONS=true` is explicitly configured.

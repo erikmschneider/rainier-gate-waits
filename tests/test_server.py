@@ -279,6 +279,116 @@ class ServerTests(unittest.TestCase):
         self.assertIn("feedbackSubmissionsLast24Hours", payload)
         self.assertIn("unreviewedFeedbackSubmissions", payload)
 
+    # ------------------------------------------------------------------
+    # v0.7.0 pre-launch hardening
+    # ------------------------------------------------------------------
+
+    def test_static_allowlist_excludes_project_files(self):
+        for private in ("server.py", "README.md", "render.yaml", "Dockerfile", "tests/test_server.py"):
+            self.assertNotIn(private, server.PUBLIC_STATIC_FILES)
+        for public in ("index.html", "styles.css", "app.js", "privacy.html", "robots.txt"):
+            self.assertIn(public, server.PUBLIC_STATIC_FILES)
+            self.assertTrue((ROOT / public).is_file(), f"{public} is allowlisted but missing")
+
+    def test_signal_band_is_capped_until_field_calibration(self):
+        with mock.patch.object(server, "ESTIMATOR_FIELD_CALIBRATED", False):
+            self.assertEqual(server.confidence_label(95), "Medium")
+            self.assertEqual(server.confidence_label(60), "Medium")
+            self.assertEqual(server.confidence_label(20), "Low")
+        with mock.patch.object(server, "ESTIMATOR_FIELD_CALIBRATED", True):
+            self.assertEqual(server.confidence_label(95), "High")
+
+    def test_separate_devices_behind_one_network_can_each_report(self):
+        shared_network = "shared-carrier-hash"
+        for index in range(server.DEVICE_REPORT_LIMIT_PER_HOUR + 3):
+            started = server.start_report(
+                {"entrance": "nisqually", "deviceId": f"device-{index}"},
+                shared_network,
+            )
+            self.assertTrue(started["reportId"])
+
+    def test_one_device_is_still_rate_limited(self):
+        for _ in range(server.DEVICE_REPORT_LIMIT_PER_HOUR):
+            server.start_report({"entrance": "nisqually", "deviceId": "repeat-device"}, "network-a")
+        with self.assertRaises(PermissionError):
+            server.start_report({"entrance": "nisqually", "deviceId": "repeat-device"}, "network-b")
+
+    def test_device_hash_is_stored_rather_than_the_raw_identifier(self):
+        server.start_report({"entrance": "nisqually", "deviceId": "plain-device-value"}, "network-a")
+        with server.database() as conn:
+            row = conn.execute("select device_hash from wait_reports limit 1").fetchone()
+        self.assertIsNotNone(row["device_hash"])
+        self.assertNotEqual(row["device_hash"], "plain-device-value")
+        self.assertEqual(len(row["device_hash"]), 64)
+
+    def test_implausible_reports_are_excluded_from_the_estimate(self):
+        rows = self._fake_report_rows([12.0, 14.0, 240.0, 0.2])
+        plausible, high, low = server.filter_plausible_reports(rows, traffic_minutes=15.0)
+        self.assertEqual([row["wait_seconds"] / 60 for row in plausible], [12.0, 14.0])
+        self.assertEqual(len(high), 1)
+        self.assertEqual(len(low), 1)
+
+    def test_reports_are_kept_when_no_traffic_reference_exists(self):
+        rows = self._fake_report_rows([12.0, 240.0])
+        plausible, high, low = server.filter_plausible_reports(rows, traffic_minutes=None)
+        self.assertEqual(len(plausible), 2)
+        self.assertEqual((high, low), ([], []))
+
+    def test_repeated_high_outliers_flag_a_queue_beyond_the_route_origin(self):
+        observed = server.utc_now()
+        server.store_traffic_snapshot("nisqually", observed, 900, 600, 8500, "google-routes", {})
+        completed = server.iso(observed)
+        with server.database() as conn:
+            for index in range(3):
+                conn.execute(
+                    """
+                    insert into wait_reports (
+                      id, entrance_slug, anonymous_client_hash, device_hash, started_at,
+                      completed_at, wait_seconds, confirmation_status, quality_score,
+                      created_at, updated_at
+                    ) values (?, 'nisqually', ?, ?, ?, ?, ?, 'completed', 80, ?, ?)
+                    """,
+                    (
+                        f"outlier-{index}", f"client-{index}", f"device-{index}",
+                        completed, completed, 70 * 60, completed, completed,
+                    ),
+                )
+        estimate = server.compute_estimate("nisqually")
+        self.assertTrue(estimate.basis["possible_queue_beyond_route_origin"])
+        self.assertEqual(estimate.basis["community_reports_far_above_traffic_signal"], 3)
+        self.assertEqual(estimate.basis["community_report_count"], 0)
+        self.assertEqual(estimate.basis["calibration_status"], "uncalibrated")
+
+    def test_public_health_view_hides_operational_detail(self):
+        public = server.health_payload(detailed=False)
+        for hidden in ("diskFreeMegabytes", "database", "poller", "lastBackupAt", "databaseError"):
+            self.assertNotIn(hidden, public)
+        self.assertIn("status", public)
+        self.assertIn("nisqually", public["entrances"])
+        self.assertEqual(set(public["entrances"]["nisqually"]), {"freshness", "ageMinutes", "entranceClosed"})
+
+    def _fake_report_rows(self, minutes: list[float]):
+        completed = server.iso(server.utc_now())
+        with server.database() as conn:
+            for index, value in enumerate(minutes):
+                conn.execute(
+                    """
+                    insert into wait_reports (
+                      id, entrance_slug, anonymous_client_hash, device_hash, started_at,
+                      completed_at, wait_seconds, confirmation_status, quality_score,
+                      created_at, updated_at
+                    ) values (?, 'nisqually', ?, ?, ?, ?, ?, 'completed', 80, ?, ?)
+                    """,
+                    (
+                        f"fake-{index}", f"client-{index}", f"device-{index}",
+                        completed, completed, round(value * 60), completed, completed,
+                    ),
+                )
+            return conn.execute(
+                "select * from wait_reports order by cast(substr(id, 6) as integer)"
+            ).fetchall()
+
+
 
 if __name__ == "__main__":
     unittest.main()

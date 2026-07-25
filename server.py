@@ -11,6 +11,7 @@ No third-party Python packages are required.
 from __future__ import annotations
 
 import csv
+import gzip
 import hashlib
 import io
 import json
@@ -64,7 +65,42 @@ BACKUP_DIR = Path(os.environ.get("RAINIER_BACKUP_DIR", DB_PATH.parent / "backups
 FEEDBACK_RATE_LIMIT_PER_HOUR = max(1, int(os.environ.get("FEEDBACK_RATE_LIMIT_PER_HOUR", "5")))
 FEEDBACK_IDENTIFIER_RETENTION_DAYS = max(1, int(os.environ.get("FEEDBACK_IDENTIFIER_RETENTION_DAYS", "30")))
 FEEDBACK_RETENTION_DAYS = max(FEEDBACK_IDENTIFIER_RETENTION_DAYS, int(os.environ.get("FEEDBACK_RETENTION_DAYS", "365")))
-SITE_VERSION = "0.6.1"
+SITE_VERSION = "0.7.0"
+# The published confidence band stays capped until the approach geometry has
+# been checked against paired field observations at both entrances.
+ESTIMATOR_FIELD_CALIBRATED = os.environ.get("ESTIMATOR_FIELD_CALIBRATED", "false").lower() in {"1", "true", "yes"}
+REPORT_DIVERGENCE_FACTOR = max(1.5, float(os.environ.get("REPORT_DIVERGENCE_FACTOR", "3.0")))
+REPORT_DIVERGENCE_FLOOR_MINUTES = max(5.0, float(os.environ.get("REPORT_DIVERGENCE_FLOOR_MINUTES", "10")))
+DEVICE_REPORT_LIMIT_PER_HOUR = max(1, int(os.environ.get("DEVICE_REPORT_LIMIT_PER_HOUR", "5")))
+NETWORK_REPORT_LIMIT_PER_HOUR = max(
+    DEVICE_REPORT_LIMIT_PER_HOUR,
+    int(os.environ.get("NETWORK_REPORT_LIMIT_PER_HOUR", "60")),
+)
+ENABLE_HSTS = os.environ.get("ENABLE_HSTS", "false").lower() in {"1", "true", "yes"}
+PUBLIC_CONTACT_EMAIL = os.environ.get("PUBLIC_CONTACT_EMAIL", "").strip()
+
+# Only these files are reachable over HTTP. Everything else in the project
+# directory -- source, tests, deployment manifests, notes -- stays private.
+PUBLIC_STATIC_FILES = {
+    "index.html",
+    "methodology.html",
+    "privacy.html",
+    "admin-feedback.html",
+    "styles.css",
+    "app.js",
+    "admin-feedback.js",
+    "methodology.js",
+    "favicon.svg",
+    "favicon.ico",
+    "og-image.png",
+    "robots.txt",
+}
+COMPRESSIBLE_SUFFIXES = {".html", ".css", ".js", ".svg", ".json", ".txt", ".xml"}
+CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+    "font-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; "
+    "base-uri 'none'; object-src 'none'"
+)
 CLOSED_ENTRANCES = {
     slug.strip().lower()
     for slug in os.environ.get("CLOSED_ENTRANCES", "").split(",")
@@ -164,6 +200,7 @@ create table if not exists wait_reports (
   entrance_slug text not null references entrances(slug),
   anonymous_client_hash text,
   report_secret_hash text,
+  device_hash text,
   started_at text not null,
   completed_at text,
   wait_seconds integer,
@@ -312,6 +349,8 @@ def initialize_database() -> None:
         }
         if "report_secret_hash" not in wait_report_columns:
             conn.execute("alter table wait_reports add column report_secret_hash text")
+        if "device_hash" not in wait_report_columns:
+            conn.execute("alter table wait_reports add column device_hash text")
         conn.execute("update entrances set active=0, updated_at=?", (now,))
         for entry in ENTRANCES.values():
             conn.execute(
@@ -640,7 +679,10 @@ def get_recent_reports(conn: sqlite3.Connection, slug: str, minutes: int = 60) -
     unique_rows: list[sqlite3.Row] = []
     seen_clients: set[str] = set()
     for row in rows:
-        client_key = row["anonymous_client_hash"] or f"report:{row['id']}"
+        # Prefer the per-browser identifier: shared carrier addresses put many
+        # separate visitors behind one network hash, and deduplicating on that
+        # would silently discard genuine reports from different vehicles.
+        client_key = row["device_hash"] or row["anonymous_client_hash"] or f"report:{row['id']}"
         if client_key in seen_clients:
             continue
         seen_clients.add(client_key)
@@ -674,8 +716,15 @@ def weighted_median(values_and_weights: list[tuple[float, float]]) -> float | No
 
 
 def confidence_label(score: int) -> str:
+    """Return the published signal-strength band.
+
+    The score measures how much usable input the estimator had, not how
+    accurate the resulting range proved to be. Until the approach geometry is
+    validated against paired field observations, the published band is capped
+    at "Medium" so the site never implies accuracy it has not demonstrated.
+    """
     if score >= 80:
-        return "High"
+        return "High" if ESTIMATOR_FIELD_CALIBRATED else "Medium"
     if score >= 55:
         return "Medium"
     return "Low"
@@ -692,6 +741,40 @@ def calculate_trend(snapshots: list[sqlite3.Row]) -> str:
     if delta <= -5:
         return "Falling"
     return "Stable"
+
+
+def filter_plausible_reports(
+    reports: list[sqlite3.Row],
+    traffic_minutes: float | None,
+) -> tuple[list[sqlite3.Row], list[sqlite3.Row], list[sqlite3.Row]]:
+    """Split community reports into plausible, implausibly high, and implausibly low.
+
+    Community timers carry up to half the weight of a published estimate, so a
+    single mistimed or malicious report should not move the number. A report is
+    treated as plausible when it lands within a multiple of the measured traffic
+    delay, with an absolute floor so that low-delay conditions still admit
+    ordinary booth-processing time.
+
+    Implausibly high reports are not merely discarded: several of them at once
+    is the signature of a queue that begins upstream of the fixed route origin,
+    which is the estimator's known blind spot.
+    """
+    if traffic_minutes is None:
+        return list(reports), [], []
+    upper = max(traffic_minutes * REPORT_DIVERGENCE_FACTOR, traffic_minutes + REPORT_DIVERGENCE_FLOOR_MINUTES)
+    lower = min(traffic_minutes / REPORT_DIVERGENCE_FACTOR, max(0.0, traffic_minutes - REPORT_DIVERGENCE_FLOOR_MINUTES))
+    plausible: list[sqlite3.Row] = []
+    too_high: list[sqlite3.Row] = []
+    too_low: list[sqlite3.Row] = []
+    for row in reports:
+        minutes = row["wait_seconds"] / 60
+        if minutes > upper:
+            too_high.append(row)
+        elif minutes < lower:
+            too_low.append(row)
+        else:
+            plausible.append(row)
+    return plausible, too_high, too_low
 
 
 def compute_estimate(slug: str) -> Estimate:
@@ -712,13 +795,15 @@ def compute_estimate(slug: str) -> Estimate:
     if traffic_age_minutes is None or traffic_age_minutes > STALE_MAX_AGE_MINUTES or not usable_provider:
         traffic_delay = None
 
-    report_minutes = [row["wait_seconds"] / 60 for row in reports if row["wait_seconds"] is not None]
+    traffic_minutes = traffic_delay / 60 if traffic_delay is not None else None
+    usable_reports = [row for row in reports if row["wait_seconds"] is not None and row["completed_at"]]
+    plausible_reports, high_outliers, low_outliers = filter_plausible_reports(usable_reports, traffic_minutes)
+    queue_beyond_origin_suspected = len(high_outliers) >= 2
+    report_minutes = [row["wait_seconds"] / 60 for row in plausible_reports]
     report_median = weighted_median([
         (row["wait_seconds"] / 60, report_recency_weight(row["completed_at"]))
-        for row in reports
-        if row["wait_seconds"] is not None and row["completed_at"]
+        for row in plausible_reports
     ])
-    traffic_minutes = traffic_delay / 60 if traffic_delay is not None else None
 
     if traffic_minutes is None:
         basis = {
@@ -727,6 +812,8 @@ def compute_estimate(slug: str) -> Estimate:
             "traffic_delay_minutes": None,
             "community_report_median_minutes": round(report_median, 1) if report_median is not None else None,
             "community_report_count": len(report_minutes),
+            "community_reports_received": len(usable_reports),
+            "calibration_status": "field-validated" if ESTIMATOR_FIELD_CALIBRATED else "uncalibrated",
             "notice": "A current traffic observation is required before a public wait estimate is shown.",
             "coordinate_notice": "Approach coordinates still require field validation.",
         }
@@ -778,6 +865,10 @@ def compute_estimate(slug: str) -> Estimate:
     incident_points = 15  # reduced later when incident-overlap logic becomes spatial
     history_points = 10 if len(snapshots) >= 3 else 4
     score = max(0, min(100, freshness_points + report_points + agreement_points + incident_points + history_points))
+    if queue_beyond_origin_suspected:
+        # Several visitors reporting far longer waits than the route segment can
+        # explain usually means the line starts upstream of the fixed origin.
+        score = max(0, score - 25)
 
     data_mode = "live" if provider == "google-routes" else "demo"
     if provider == "google-routes" and report_minutes:
@@ -792,6 +883,11 @@ def compute_estimate(slug: str) -> Estimate:
         "community_report_median_minutes": round(report_median, 1) if report_median is not None else None,
         "community_report_count": len(report_minutes),
         "community_report_weight": report_weight if report_median is not None else 0,
+        "community_reports_received": len(usable_reports),
+        "community_reports_far_above_traffic_signal": len(high_outliers),
+        "community_reports_far_below_traffic_signal": len(low_outliers),
+        "possible_queue_beyond_route_origin": queue_beyond_origin_suspected,
+        "calibration_status": "field-validated" if ESTIMATOR_FIELD_CALIBRATED else "uncalibrated",
         "coordinate_notice": "Approach coordinates still require field validation.",
     }
     return Estimate(
@@ -834,6 +930,7 @@ def persist_estimate(slug: str, estimate: Estimate) -> None:
 
 
 def cleanup_old_reports() -> dict[str, int]:
+    # Device hashes are cleared on the same schedule as the other identifiers.
     abandoned_cutoff = iso(utc_now() - timedelta(hours=ABANDONED_REPORT_RETENTION_HOURS))
     identifier_cutoff = iso(utc_now() - timedelta(days=REPORT_IDENTIFIER_RETENTION_DAYS))
     with database() as conn:
@@ -1040,7 +1137,30 @@ def current_payload() -> dict[str, Any]:
     }
 
 
-def health_payload() -> dict[str, Any]:
+PUBLIC_HEALTH_FIELDS = {
+    "status",
+    "time",
+    "version",
+    "pollingActiveNow",
+    "pollIntervalSeconds",
+    "freshnessThresholdsMinutes",
+    "closedEntrances",
+    "entrances",
+}
+PUBLIC_HEALTH_ENTRANCE_FIELDS = {"freshness", "ageMinutes", "entranceClosed"}
+
+
+def public_health_view(payload: dict[str, Any]) -> dict[str, Any]:
+    """Trim operational detail from the health response shown to visitors."""
+    trimmed = {key: value for key, value in payload.items() if key in PUBLIC_HEALTH_FIELDS}
+    trimmed["entrances"] = {
+        slug: {key: value for key, value in detail.items() if key in PUBLIC_HEALTH_ENTRANCE_FIELDS}
+        for slug, detail in payload.get("entrances", {}).items()
+    }
+    return trimmed
+
+
+def health_payload(detailed: bool = True) -> dict[str, Any]:
     now = utc_now()
     polling_active = within_polling_window(now)
     database_writable = False
@@ -1124,9 +1244,10 @@ def health_payload() -> dict[str, Any]:
     else:
         status = "ok"
 
-    return {
+    payload = {
         "status": status,
         "time": iso(now),
+        "version": SITE_VERSION,
         "database": str(DB_PATH.name),
         "databaseWritable": database_writable,
         "databaseError": database_error,
@@ -1151,7 +1272,9 @@ def health_payload() -> dict[str, Any]:
         "backupRetentionCount": BACKUP_RETENTION_COUNT,
         "poller": poll_state,
         "requestLogsUseHashedClientIdentifiers": True,
+        "estimatorFieldCalibrated": ESTIMATOR_FIELD_CALIBRATED,
     }
+    return payload if detailed else public_health_view(payload)
 
 
 def conditions_payload() -> dict[str, Any]:
@@ -1271,6 +1394,12 @@ def report_secret_hash(secret: str) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def device_hash(device_id: str) -> str:
+    """Hash a browser-generated identifier used for per-device rate limiting."""
+    raw = f"{HASH_SECRET}|device|{device_id}".encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
 def request_log_identifier(ip: str, user_agent: str) -> str:
     return client_hash(ip, user_agent)[:12]
 
@@ -1298,26 +1427,40 @@ def start_report(payload: dict[str, Any], client: str) -> dict[str, Any]:
     slug = str(payload.get("entrance") or "")
     if slug not in ENTRANCES:
         raise ValueError("Select a valid entrance")
+    supplied_device = str(payload.get("deviceId") or "").strip()[:128]
+    device = device_hash(supplied_device) if supplied_device else None
     with database() as conn:
-        recent_count = conn.execute(
+        window_start = iso(utc_now() - timedelta(hours=1))
+        if device:
+            device_count = conn.execute(
+                "select count(*) as count from wait_reports where device_hash=? and created_at>=?",
+                (device, window_start),
+            ).fetchone()["count"]
+            if device_count >= DEVICE_REPORT_LIMIT_PER_HOUR:
+                raise PermissionError("Too many report starts from this device; try again later")
+        # Everyone queued at a gate shares a handful of carrier addresses, so the
+        # network-level ceiling is only a wide abuse backstop. Browsers that do
+        # not send a device identifier still fall back to the strict limit.
+        network_count = conn.execute(
             "select count(*) as count from wait_reports where anonymous_client_hash=? and created_at>=?",
-            (client, iso(utc_now() - timedelta(hours=1))),
+            (client, window_start),
         ).fetchone()["count"]
-        if recent_count >= 5:
-            raise PermissionError("Too many report starts from this device; try again later")
+        network_limit = NETWORK_REPORT_LIMIT_PER_HOUR if device else DEVICE_REPORT_LIMIT_PER_HOUR
+        if network_count >= network_limit:
+            raise PermissionError("Too many report starts from this network; try again later")
         report_id = str(uuid.uuid4())
         report_token = secrets.token_urlsafe(32)
         now = iso()
         conn.execute(
             """
             insert into wait_reports (
-              id, entrance_slug, anonymous_client_hash, report_secret_hash, started_at,
+              id, entrance_slug, anonymous_client_hash, report_secret_hash, device_hash, started_at,
               queue_entry_lat, queue_entry_lng, queue_entry_accuracy_meters,
               confirmation_status, created_at, updated_at
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, 'started', ?, ?)
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, 'started', ?, ?)
             """,
             (
-                report_id, slug, client, report_secret_hash(report_token), now,
+                report_id, slug, client, report_secret_hash(report_token), device, now,
                 report_coordinate(payload, "latitude"),
                 report_coordinate(payload, "longitude"),
                 report_accuracy(payload),
@@ -1626,7 +1769,19 @@ class Poller(threading.Thread):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "RainierGateWaits/0.6.1"
+    server_version = "RainierGateWaits"
+    sys_version = ""
+    # Keep-alive matters on slow mobile connections near the park entrances.
+    protocol_version = "HTTP/1.1"
+
+    def apply_common_headers(self) -> None:
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+        self.send_header("Content-Security-Policy", CONTENT_SECURITY_POLICY)
+        if ENABLE_HSTS:
+            self.send_header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 
     def client_ip(self) -> str:
         direct = self.client_address[0]
@@ -1651,7 +1806,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
+        self.apply_common_headers()
         self.end_headers()
         self.wfile.write(body)
 
@@ -1664,16 +1819,19 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
+        self.apply_common_headers()
         self.end_headers()
         self.wfile.write(body)
+
+    def has_admin_token(self) -> bool:
+        supplied = self.headers.get("X-Admin-Token", "")
+        return bool(ADMIN_TOKEN and supplied and secrets.compare_digest(supplied, ADMIN_TOKEN))
 
     def require_admin(self) -> bool:
         if not ADMIN_TOKEN:
             self.send_error_json(404, "Administrative tools are disabled")
             return False
-        supplied = self.headers.get("X-Admin-Token", "")
-        if not supplied or not secrets.compare_digest(supplied, ADMIN_TOKEN):
+        if not self.has_admin_token():
             self.send_error_json(403, "Invalid admin token")
             return False
         return True
@@ -1697,7 +1855,7 @@ class Handler(BaseHTTPRequestHandler):
         query = urllib.parse.parse_qs(parsed.query)
         try:
             if path == "/api/v1/health":
-                health = health_payload()
+                health = health_payload(detailed=self.has_admin_token())
                 self.send_json(health, 503 if health["status"] == "error" else 200)
                 return
             if path in {"/api/v1/entrances", "/api/v1/entrances/current"}:
@@ -1710,8 +1868,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not self.require_admin():
                     return
                 status_filter = first(query, "status")
-                limit = int(first(query, "limit") or "100")
-                offset = int(first(query, "offset") or "0")
+                limit = query_int(query, "limit", 100, 1, 500)
+                offset = query_int(query, "offset", 0, 0, 100_000)
                 self.send_json(feedback_admin_payload(status_filter, limit, offset))
                 return
             if path == "/api/v1/admin/feedback.csv":
@@ -1726,7 +1884,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             match = re.fullmatch(r"/api/v1/entrances/([a-z0-9-]+)/history", path)
             if match:
-                hours = int(first(query, "hours") or "24")
+                hours = query_int(query, "hours", 24, 1, 168)
                 self.send_json(history_payload(match.group(1), hours))
                 return
             if path.startswith("/api/"):
@@ -1737,9 +1895,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error_json(404, str(exc).strip("'"))
         except ValueError as exc:
             self.send_error_json(400, str(exc))
-        except Exception as exc:
-            traceback.print_exc()
-            self.send_error_json(500, f"Server error: {exc}")
+        except Exception:
+            print(f"[error] {redact_secrets(traceback.format_exc())}")
+            self.send_error_json(500, "Server error")
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urllib.parse.urlparse(self.path)
@@ -1773,28 +1931,56 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error_json(404, str(exc).strip("'"))
         except ValueError as exc:
             self.send_error_json(400, str(exc))
-        except Exception as exc:
-            traceback.print_exc()
-            self.send_error_json(500, f"Server error: {exc}")
+        except Exception:
+            print(f"[error] {redact_secrets(traceback.format_exc())}")
+            self.send_error_json(500, "Server error")
 
     def serve_static(self, path: str) -> None:
+        # Explicit allowlist: application source, tests, deployment manifests and
+        # project notes live in the same directory and must never be served.
         relative = "index.html" if path in {"", "/"} else urllib.parse.unquote(path.lstrip("/"))
-        candidate = (ROOT / relative).resolve()
-        if ROOT not in candidate.parents and candidate != ROOT:
-            self.send_error(HTTPStatus.FORBIDDEN)
+        if relative not in PUBLIC_STATIC_FILES:
+            self.send_error(HTTPStatus.NOT_FOUND)
             return
-        if not candidate.is_file() or candidate.name.startswith(".") or candidate.suffix in {".sqlite3", ".sql"}:
+        candidate = (ROOT / relative).resolve()
+        if candidate.parent != ROOT or not candidate.is_file():
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         body = candidate.read_bytes()
         content_type, _ = mimetypes.guess_type(candidate.name)
+        content_type = content_type or "application/octet-stream"
+        if content_type.startswith("text/") or candidate.suffix in {".js", ".json", ".svg"}:
+            content_type = f"{content_type}; charset=utf-8"
+        encoding = None
+        if (
+            candidate.suffix in COMPRESSIBLE_SUFFIXES
+            and len(body) > 1024
+            and "gzip" in self.headers.get("Accept-Encoding", "")
+        ):
+            body = gzip.compress(body, compresslevel=6)
+            encoding = "gzip"
         self.send_response(200)
-        self.send_header("Content-Type", f"{content_type or 'application/octet-stream'}; charset=utf-8" if (content_type or "").startswith("text/") else content_type or "application/octet-stream")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("X-Content-Type-Options", "nosniff")
+        if encoding:
+            self.send_header("Content-Encoding", encoding)
+        self.send_header("Vary", "Accept-Encoding")
+        self.apply_common_headers()
         self.send_header("Cache-Control", "no-cache" if candidate.suffix in {".html", ".js", ".css"} else "public, max-age=3600")
         self.end_headers()
         self.wfile.write(body)
+
+
+def query_int(query: dict[str, list[str]], key: str, default: int, minimum: int, maximum: int) -> int:
+    """Parse a query parameter without leaking interpreter text to the client."""
+    raw = first(query, key)
+    if raw is None or raw == "":
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{key} must be a whole number") from exc
+    return max(minimum, min(maximum, value))
 
 
 def first(query: dict[str, list[str]], key: str) -> str | None:

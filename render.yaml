@@ -37,6 +37,18 @@ services:
         value: 24
       - key: REPORT_IDENTIFIER_RETENTION_DAYS
         value: 60
+      - key: DEVICE_REPORT_LIMIT_PER_HOUR
+        value: 5
+      - key: NETWORK_REPORT_LIMIT_PER_HOUR
+        value: 60
+      - key: REPORT_DIVERGENCE_FACTOR
+        value: 3.0
+      - key: REPORT_DIVERGENCE_FLOOR_MINUTES
+        value: 10
+      - key: ESTIMATOR_FIELD_CALIBRATED
+        value: false
+      - key: ENABLE_HSTS
+        value: true
       - key: FEEDBACK_RATE_LIMIT_PER_HOUR
         value: 5
       - key: FEEDBACK_IDENTIFIER_RETENTION_DAYS

@@ -36,6 +36,10 @@ The database initializer performs in-place migrations for timer tokens and the f
 - `ACCEPT_REPORT_LOCATIONS=false` until location verification is intentionally launched
 - `TRUST_PROXY_HEADERS=true`
 - `FEEDBACK_RATE_LIMIT_PER_HOUR=5`
+- `DEVICE_REPORT_LIMIT_PER_HOUR=5`
+- `NETWORK_REPORT_LIMIT_PER_HOUR=60`
+- `ESTIMATOR_FIELD_CALIBRATED=false` until paired field observations exist
+- `ENABLE_HSTS=true`
 - `FEEDBACK_IDENTIFIER_RETENTION_DAYS=30`
 - `FEEDBACK_RETENTION_DAYS=365`
 
@@ -52,6 +56,20 @@ The optional `WSDOT_ACCESS_CODE` can be added later. The beta currently uses dir
 5. Set conservative quotas and billing alerts.
 
 The current request uses traffic-adjusted duration, static duration, and distance without `TRAFFIC_ON_POLYLINE`.
+
+## Verify the hardening (v0.7.0)
+
+```text
+GET /server.py                  -> 404
+GET /README.md                  -> 404
+GET /render.yaml                -> 404
+GET /api/v1/health              -> no diskFreeMegabytes, no poller block
+GET /api/v1/health + admin token -> full payload
+```
+
+Response headers on `/` must include `Content-Security-Policy`, `X-Frame-Options`, `Referrer-Policy`, and — with `ENABLE_HSTS=true` — `Strict-Transport-Security`. Confirm the entrance cards read "Signal strength" and never publish a High band while `ESTIMATOR_FIELD_CALIBRATED=false`.
+
+Set `PUBLIC_CONTACT_EMAIL` and point the address used in `index.html` and `privacy.html` at a real mailbox before announcing the site.
 
 ## Verify after deployment
 

@@ -205,6 +205,20 @@ select, input[type="date"] { min-height: 46px; width: 100%; border: 1px solid #c
 .timer-actions { display: flex; gap: 10px; margin-top: 26px; }
 .timer-actions button { flex: 1; }
 .timer-actions button:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+/* Passenger-only timer safety framing (RCW 46.61.672). */
+.safety-note { display: grid; gap: 4px; margin-top: 16px; padding: 14px 16px; border-radius: 12px; background: var(--red-soft); border: 1px solid rgba(185,74,60,.32); }
+.safety-note strong { font-size: .86rem; color: #8d3025; }
+.safety-note span { color: #6d3830; font-size: .82rem; }
+.timer-safety { margin-top: 18px !important; padding-top: 14px; border-top: 1px solid var(--line); color: #8d3025 !important; font-weight: 700; }
+
+/* Gate requirements panel. */
+.entry-requirements { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
+.entry-requirements h5 { margin: 0 0 10px; font-size: .78rem; font-weight: 850; text-transform: uppercase; letter-spacing: .08em; color: var(--ink); }
+.entry-requirements ul { margin: 0; padding-left: 1.05rem; display: grid; gap: 7px; }
+.entry-requirements li { color: var(--ink-soft); font-size: .82rem; }
+.entry-requirements p { margin: 12px 0 0; font-size: .78rem; color: var(--ink-soft); }
+.entry-requirements a { color: var(--forest); font-weight: 800; }
+
 .timer-result { margin-top: 18px; padding: 14px; background: white; border: 1px solid var(--line); border-radius: 12px; font-size: .82rem; }
 
 .method-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-top: 38px; }

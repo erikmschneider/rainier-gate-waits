@@ -6,6 +6,14 @@ The Python standard-library service hosts the website and API, polls Google Rout
 
 ## Public-beta safeguards
 
+- Only an explicit allowlist of front-end files is reachable over HTTP; application source, tests, and deployment manifests are not served.
+- The published signal-strength band is capped at Medium until `ESTIMATOR_FIELD_CALIBRATED=true` confirms field validation.
+- Community reports are rate-limited per browser rather than per network address, so shared carrier addresses at an entrance do not block genuine reporters.
+- Reports that diverge sharply from the measured traffic signal are excluded from the estimate and recorded; repeated high outliers flag a possible queue beyond the route origin and lower the score.
+- Security headers, including a Content Security Policy without inline script, are sent on every response.
+- The public health response omits operational detail; the full payload requires the administrator token.
+- Timer instructions are written for passengers, not drivers (RCW 46.61.672).
+
 - No plausible browser fallback waits are displayed when the API is unavailable.
 - Synthetic traffic is disabled by default and must be explicitly enabled for local demonstrations.
 - Traffic observations up to 30 minutes old are treated as current.
@@ -34,7 +42,7 @@ The Python standard-library service hosts the website and API, polls Google Rout
 - Privacy notice and links to official NPS conditions and road status
 - Estimate-accuracy and general beta-feedback forms
 - Private feedback dashboard with review statuses, notes, and CSV export
-- Automated Python tests
+- Automated Python tests (28)
 - No third-party Python packages
 
 ## Run locally
@@ -105,6 +113,7 @@ python3 -m unittest discover -s tests -v
 - `API.md` — endpoint contract
 - `PUBLIC_DEPLOYMENT.md` — Render deployment and beta checklist
 - `tests/test_server.py` — backend tests
+- `PRELAUNCH_UPDATE_NOTES.md` — v0.7.0 hardening changes and pre-deploy checklist
 
 ## Methodological status
 
@@ -122,4 +131,4 @@ Feedback records live in the same persistent SQLite database and are included in
 
 ## Public methodology
 
-The calculation is documented at `/methodology.html`. Visitors can submit calculation-specific comments through the existing private feedback workflow. The page documents model version `beta-heuristic-0.6`; the documentation/site release is v0.6.1.
+The calculation is documented at `/methodology.html`. Visitors can submit calculation-specific comments through the existing private feedback workflow. The page documents model version `beta-heuristic-0.6`; the documentation/site release is v0.7.0. See `PRELAUNCH_UPDATE_NOTES.md` for the pre-launch hardening pass.

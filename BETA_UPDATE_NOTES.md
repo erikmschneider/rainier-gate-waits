@@ -99,3 +99,18 @@ Use `CLOSED_ENTRANCES=white-river` when White River should be manually suppresse
 - Added a methodology-specific feedback category throughout the public form, backend, private dashboard, and CSV export.
 - Methodology feedback remains separate from community timers and does not automatically affect estimates.
 - The estimator itself remains `beta-heuristic-0.6`.
+
+## v0.7.0 pre-launch hardening
+
+- Replaced the static-file blocklist with an allowlist; application source and deployment files are no longer served.
+- Capped the published signal-strength band at Medium until field calibration, and renamed the metric from Confidence.
+- Rewrote timer instructions for passengers and added an RCW 46.61.672 warning above the controls.
+- Keyed report limits and estimator deduplication to a browser-generated device identifier instead of the network address.
+- Added a plausibility filter for community reports, with a recorded flag for queues beyond the route origin.
+- Added security headers, gzip, HTTP/1.1 keep-alive, and generic 500 bodies.
+- Trimmed the public health response; full detail now requires the administrator token.
+- Slowed the homepage refresh to five minutes with visibility awareness.
+- Added social metadata, favicon, social preview image, robots.txt, gate-requirement copy, and a contact address.
+- Expanded the backend suite from 19 to 28 tests.
+
+Full detail in `PRELAUNCH_UPDATE_NOTES.md`.

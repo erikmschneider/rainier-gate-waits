@@ -67,6 +67,22 @@ let activeReportId = null;
 let activeReportToken = null;
 let activeReportMode = "local";
 
+function deviceIdentifier() {
+  // A random per-browser value. It replaces the network address as the key for
+  // duplicate and abuse control, because visitors queued at the same entrance
+  // usually share a small number of carrier addresses.
+  try {
+    let value = localStorage.getItem("rainier-device-id");
+    if (!value) {
+      value = (crypto.randomUUID && crypto.randomUUID()) || `dev-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+      localStorage.setItem("rainier-device-id", value);
+    }
+    return value;
+  } catch {
+    return "";
+  }
+}
+
 async function apiFetch(path, options = {}) {
   const response = await fetch(path, {
     ...options,
@@ -161,7 +177,7 @@ function renderEntranceCards() {
         <p class="queue-detail${freshnessClass}">${escapeHtml(sourceLabel(entrance))}</p>
         <div class="metric-row">
           <div><span>Trend</span><strong>${escapeHtml(displayable ? entrance.trend : "Unavailable")}</strong></div>
-          <div><span>Confidence</span><strong>${escapeHtml(displayable ? entrance.confidence : "Unavailable")}${displayable && Number.isFinite(entrance.confidenceScore) ? ` · ${entrance.confidenceScore}` : ""}</strong></div>
+          <div><span>Signal strength</span><strong>${escapeHtml(displayable ? entrance.confidence : "Unavailable")}${displayable && Number.isFinite(entrance.confidenceScore) ? ` · ${entrance.confidenceScore}` : ""}</strong></div>
           <div><span>Community reports</span><strong>${Number(entrance.reports) || 0}</strong></div>
           <div><span>Observation</span><strong>${escapeHtml(freshnessLabel(entrance))}</strong></div>
         </div>
@@ -365,7 +381,7 @@ async function startTimer() {
   try {
     const result = await apiFetch("/api/v1/reports/start", {
       method: "POST",
-      body: JSON.stringify({ entrance })
+      body: JSON.stringify({ entrance, deviceId: deviceIdentifier() })
     });
     activeReportId = result.reportId;
     activeReportToken = result.reportToken;
@@ -587,10 +603,20 @@ async function initialize() {
     openFeedback("general", "", "methodology");
   }
 
-  window.setInterval(() => {
+  // The server polls the traffic provider every 15 minutes, so a one-minute
+  // refresh only burned battery and cellular data in a queued vehicle.
+  let lastRefreshAt = Date.now();
+  const refresh = () => {
+    lastRefreshAt = Date.now();
     loadCurrentData();
     loadConditions();
-  }, 60_000);
+  };
+  window.setInterval(() => {
+    if (document.visibilityState === "visible") refresh();
+  }, 300_000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && Date.now() - lastRefreshAt > 120_000) refresh();
+  });
 }
 
 initialize();
