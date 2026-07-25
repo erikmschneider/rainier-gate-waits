@@ -73,7 +73,7 @@ This trade-off is documented honestly in `methodology.html`: the filter suppress
 - The homepage refresh interval moved from 60 seconds to 5 minutes, is skipped when the tab is hidden, and refreshes on return to the tab. The server only polls every 15 minutes, so the old cadence spent battery and cellular data in a queued vehicle for no new data.
 - Added Open Graph and Twitter card metadata, `favicon.svg`, `og-image.png`, canonical URL, and `robots.txt` disallowing `/admin-feedback.html` and `/api/`.
 - Added a "What you need at the gate" panel: no timed-entry reservation for the 2026 season, the entrance fee still applies, and parking is actively managed. Verify each season before the site reopens for summer.
-- Added a contact address to the footer and the privacy notice.
+- The privacy notice now routes questions and removal requests through the beta feedback form (`index.html?feedback=general`), which preselects the general category and offers an optional contact field. No email address is published, so there is no unmonitored mailbox and nothing for scrapers to harvest.
 
 ## Configuration added
 
@@ -85,11 +85,10 @@ This trade-off is documented honestly in `methodology.html`: the filter suppress
 | `REPORT_DIVERGENCE_FACTOR` | `3.0` | Report plausibility multiple |
 | `REPORT_DIVERGENCE_FLOOR_MINUTES` | `10` | Absolute plausibility allowance |
 | `ENABLE_HSTS` | `false` | Set true behind Render's HTTPS proxy |
-| `PUBLIC_CONTACT_EMAIL` | empty | Reserved for a future contact block |
 
 ## Before deploying
 
-1. Set the contact address. The footer and privacy notice currently use `hello@rainiergatewaits.com`; point that mailbox somewhere real or change the address in `index.html` and `privacy.html`.
+1. Watch the feedback queue at `/admin-feedback.html`. The site publishes no email address, so that queue is the only inbound channel for privacy questions and removal requests.
 2. Set `ENABLE_HSTS=true` on Render, and leave `ESTIMATOR_FIELD_CALIBRATED=false`.
 3. Confirm `GET /server.py` returns 404 on the deployed site.
 4. Confirm `GET /api/v1/health` without a token omits `diskFreeMegabytes`.

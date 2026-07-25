@@ -69,7 +69,7 @@ GET /api/v1/health + admin token -> full payload
 
 Response headers on `/` must include `Content-Security-Policy`, `X-Frame-Options`, `Referrer-Policy`, and — with `ENABLE_HSTS=true` — `Strict-Transport-Security`. Confirm the entrance cards read "Signal strength" and never publish a High band while `ESTIMATOR_FIELD_CALIBRATED=false`.
 
-Set `PUBLIC_CONTACT_EMAIL` and point the address used in `index.html` and `privacy.html` at a real mailbox before announcing the site.
+The site publishes no email address. Privacy questions and removal requests route through the beta feedback form, which is reviewed at `/admin-feedback.html`. Check that queue on a regular schedule, since it is now the only inbound channel.
 
 ## Verify after deployment
 

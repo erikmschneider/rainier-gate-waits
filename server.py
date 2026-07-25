@@ -77,7 +77,6 @@ NETWORK_REPORT_LIMIT_PER_HOUR = max(
     int(os.environ.get("NETWORK_REPORT_LIMIT_PER_HOUR", "60")),
 )
 ENABLE_HSTS = os.environ.get("ENABLE_HSTS", "false").lower() in {"1", "true", "yes"}
-PUBLIC_CONTACT_EMAIL = os.environ.get("PUBLIC_CONTACT_EMAIL", "").strip()
 
 # Only these files are reachable over HTTP. Everything else in the project
 # directory -- source, tests, deployment manifests, notes -- stays private.

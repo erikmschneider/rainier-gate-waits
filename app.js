@@ -601,6 +601,9 @@ async function initialize() {
   const requestedFeedback = new URLSearchParams(window.location.search).get("feedback");
   if (requestedFeedback === "methodology") {
     openFeedback("general", "", "methodology");
+  } else if (requestedFeedback === "general") {
+    // Deep link used by the privacy notice for questions and removal requests.
+    openFeedback("general", "", "other");
   }
 
   // The server polls the traffic provider every 15 minutes, so a one-minute
