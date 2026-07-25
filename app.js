@@ -322,13 +322,19 @@ function renderForecast(forecast) {
     return `
       <div class="forecast-column" title="${time}: ${low} to ${high} minutes">
         <div class="forecast-bar-wrap">
-          <div class="forecast-bar ${status}" style="height:${height}px"><span>${high}</span></div>
+          <div class="forecast-bar ${status}" data-height="${height}"><span>${high}</span></div>
         </div>
         <span class="forecast-time">${time}</span>
         <span class="forecast-range">${low}–${high}</span>
       </div>
     `;
   }).join("");
+
+  // Bar heights are applied through the CSSOM rather than an inline style
+  // attribute, which the Content Security Policy blocks.
+  document.querySelectorAll("#forecast-chart .forecast-bar").forEach((bar) => {
+    bar.style.height = `${bar.dataset.height}px`;
+  });
 
   const lowWindows = forecast.filter(({ high }) => high <= 10).map(({ hour }) => hour);
   const firstLow = lowWindows[0];

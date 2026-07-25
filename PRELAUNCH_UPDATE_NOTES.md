@@ -54,6 +54,7 @@ This trade-off is documented honestly in `methodology.html`: the filter suppress
 
 - Security headers on every response: `Content-Security-Policy`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, `Permissions-Policy`, and `Strict-Transport-Security` when `ENABLE_HSTS=true`.
 - The CSP has no `unsafe-inline`. The inline script in `methodology.html` moved to `methodology.js`.
+- The CSP also blocks inline `style` attributes. The planning chart set bar heights that way, which flattened every bar to its 6px minimum; heights now go through the CSSOM instead. `test_no_inline_style_attributes_under_a_strict_csp` guards against a repeat, since server-side tests cannot see rendering.
 - 500 responses return `"Server error"`; the traceback goes to the application log through `redact_secrets`.
 - Query parameters are parsed and clamped by `query_int()`, so malformed input no longer returns interpreter text.
 - `protocol_version = "HTTP/1.1"` enables keep-alive.

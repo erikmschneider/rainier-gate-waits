@@ -367,6 +367,27 @@ class ServerTests(unittest.TestCase):
         self.assertIn("nisqually", public["entrances"])
         self.assertEqual(set(public["entrances"]["nisqually"]), {"freshness", "ageMinutes", "entranceClosed"})
 
+    def test_no_inline_style_attributes_under_a_strict_csp(self):
+        """Inline style attributes are silently dropped by the CSP.
+
+        This is not a theoretical concern: the planning chart set bar heights
+        with style="height:NNpx", and adding the policy flattened every bar to
+        its 6px minimum while the numbers above them stayed correct. Server
+        tests cannot see rendering, so the guard lives here instead.
+        """
+        policy = server.CONTENT_SECURITY_POLICY
+        self.assertIn("style-src 'self'", policy)
+        self.assertNotIn("unsafe-inline", policy)
+        offenders = []
+        for name in sorted(server.PUBLIC_STATIC_FILES):
+            path = ROOT / name
+            if path.suffix not in {".html", ".js"} or not path.is_file():
+                continue
+            for number, line in enumerate(path.read_text().splitlines(), start=1):
+                if 'style="' in line or "style='" in line:
+                    offenders.append(f"{name}:{number}")
+        self.assertEqual(offenders, [], f"inline style attributes will be blocked: {offenders}")
+
     def _fake_report_rows(self, minutes: list[float]):
         completed = server.iso(server.utc_now())
         with server.database() as conn:
