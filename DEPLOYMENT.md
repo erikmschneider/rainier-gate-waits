@@ -37,7 +37,7 @@ Recommended optional configuration:
 - Poll only Nisqually and White River during the pilot.
 - Request only duration, static duration, and distance; do not enable `TRAFFIC_ON_POLYLINE`.
 - Cache one result per entrance per polling interval; do not call the routing API separately for each site visitor.
-- Validate each route segment in the provider’s route demo and test whether queued traffic is represented consistently.
+- Validate each extended route corridor in the provider’s route demo, confirm that it follows the intended state highway, and compare the provisional free-flow baseline and hourly queue boundary with paired field observations.
 
 ## Privacy and abuse controls
 
@@ -82,3 +82,12 @@ SQLite is appropriate for a local MVP and limited pilot. Migrate to PostgreSQL/P
 4. Repeat during no-queue, moderate, and heavy-queue periods.
 5. Test whether roadwork and ordinary slow traffic create false waits.
 6. Adjust approach segments and estimator calibration by entrance.
+
+
+## Queue-aware estimator settings (v0.8.0)
+
+The 15-minute duration poll and hourly traffic-polyline scan are intentionally separate. Keep `ENABLE_TRAFFIC_POLYLINE=true` and `TRAFFIC_POLYLINE_INTERVAL_SECONDS=3600` for the default cost-controlled schedule. A failed polyline scan does not block duration estimates.
+
+Route coordinates and free-flow baselines are environment variables. After changing any route coordinate, increment that entrance's `*_ROUTE_VERSION` so the baseline learner and history endpoints do not mix old and new corridors. The shipped values are provisional and should not be marked field-calibrated until paired observations support them.
+
+The detailed admin health response reports current route duration, Google historical duration, the active free-flow baseline, derived delay, route distance, latest queue-start coordinate, queue distance, and last successful polyline scan.

@@ -39,37 +39,46 @@
       <article class="methodology-card">
         <p class="eyebrow">Transparent by design</p>
         <h1>How estimates work</h1>
-        <p class="methodology-lead">Rainier Gate Waits is an experimental, independent service. It estimates entrance delay by comparing current traffic travel time with normal travel time on a fixed approach segment, then optionally adjusting that baseline with recent community wait timers.</p>
+        <p class="methodology-lead">Rainier Gate Waits is an experimental, independent service. It estimates entrance delay by comparing current travel time on an extended approach corridor with a route-specific free-flow baseline, then optionally adjusts that signal with recent community wait timers.</p>
 
         <div class="methodology-meta">
-          <span>Model: beta-heuristic-0.7</span>
-          <span>Last updated: July 24, 2026</span>
+          <span>Model: beta-heuristic-0.8</span>
+          <span>Last updated: July 25, 2026</span>
           <span>Applies to Nisqually and White River</span>
         </div>
 
         <div class="method-warning">
-          <strong>Important limitation:</strong> traffic delay on an approach road is not the same thing as a direct measurement of the entrance-booth line. The route segments and weighting rules still require field calibration.
+          <strong>Important limitation:</strong> traffic travel time and Google speed categories are not direct measurements of an entrance-booth line. The extended corridors, free-flow baselines, queue-boundary rules, and weighting rules still require field calibration.
         </div>
 
         <h2 id="summary">Plain-language summary</h2>
         <ol>
-          <li>The service checks the traffic-aware and normal travel times on a fixed road segment approaching each entrance.</li>
-          <li>The difference between those travel times becomes the baseline delay.</li>
-          <li>Recent visitor timers can adjust that baseline, but cannot create an estimate when recent traffic data is unavailable.</li>
+          <li>The service checks current traffic-aware travel time on an extended fixed corridor approaching each entrance.</li>
+          <li>It subtracts a route-specific free-flow baseline rather than Google's historically influenced <code>staticDuration</code>.</li>
+          <li>Once per hour, it also requests traffic categories along the route to estimate where gate-connected congestion begins.</li>
+          <li>Recent visitor timers can adjust the time estimate, but cannot create an estimate when recent traffic data is unavailable.</li>
           <li>The service widens the displayed range when reports disagree or the traffic observation is aging.</li>
           <li>Old observations are labeled stale and then hidden.</li>
         </ol>
 
-        <h2 id="traffic-baseline">1. Traffic-delay baseline</h2>
-        <p>For each entrance, the service requests a current traffic-adjusted travel time and a normal travel time for a fixed approach route. It calculates the baseline as:</p>
+        <h2 id="traffic-baseline">1. Full-route traffic-delay baseline</h2>
+        <p>Every 15 minutes during polling hours, the service requests the current traffic-aware travel time for a fixed corridor that begins farther upstream than the original pilot route and ends just beyond the entrance area. It calculates the traffic signal as:</p>
         <div class="formula-card">
           <strong>Baseline traffic delay</strong>
-          <code>maximum of 0 and (traffic-adjusted travel time − normal travel time)</code>
+          <code>maximum of 0 and (current full-route travel time − route-specific free-flow baseline)</code>
         </div>
-        <p>Example: if an approach normally takes 12 minutes but currently takes 32 minutes, the baseline delay is 20 minutes.</p>
-        <p>This calculation assumes that most unusual delay on the selected segment is related to the entrance queue. Construction, collisions, roadside activity, weather, or congestion unrelated to the gate can violate that assumption.</p>
+        <p>Example: if the extended approach takes 12 minutes in free-flow conditions but currently takes 33 minutes, the baseline delay is 21 minutes.</p>
+        <p>The provisional free-flow baseline is configured separately for each entrance. After at least 12 observations exist for the current route version, the service also calculates the lower tenth percentile of recent live route durations. That learned value may lower—but never raise—the configured baseline, which reduces the risk of hiding delay behind an historically congested comparison.</p>
+        <p>Google's <code>staticDuration</code> is retained in private diagnostics for comparison, but it no longer determines the public wait. Google describes that value as reflecting historical traffic, so subtracting it could show only delay beyond an already-busy historical expectation.</p>
+        <p>This method still assumes that most unusual delay on the selected corridor is related to entrance access. Construction, collisions, roadside activity, weather, or congestion unrelated to the gate can violate that assumption.</p>
 
-        <h2 id="community-timers">2. Qualifying community timers</h2>
+        <h2 id="queue-boundary">2. Approximate congestion boundary</h2>
+        <p>Once per hour, the service makes a separate traffic-on-polyline request. Google divides the returned route into <strong>NORMAL</strong>, <strong>SLOW</strong>, and <strong>TRAFFIC_JAM</strong> intervals.</p>
+        <p>The service starts at the entrance end of the route and works backward. It treats adjoining SLOW and TRAFFIC_JAM intervals as potential gate congestion, allows only short normal-flow gaps within that block, and ignores isolated slowdowns separated from the entrance by a substantial normal segment.</p>
+        <p>When a connected block is found, the site can report an approximate statement such as “congestion appears to begin about 3.1 miles before the entrance.” The boundary is not a directly observed back-of-line position and is not used to convert distance into wait time. The time estimate continues to come from full-route travel duration.</p>
+        <div class="method-note"><strong>Independent failure path:</strong> if the hourly polyline request fails, the lower-cost 15-minute duration estimate can continue. A missing queue boundary does not create or suppress a wait estimate.</div>
+
+        <h2 id="community-timers">3. Qualifying community timers</h2>
         <p>A community timer can be considered only when it:</p>
         <ul>
           <li>Runs for at least 2 minutes and no more than 3 hours.</li>
@@ -93,7 +102,7 @@
           </table>
         </div>
 
-        <h2 id="blending">3. Blending traffic and community data</h2>
+        <h2 id="blending">4. Blending traffic and community data</h2>
         <p>Let <strong>G</strong> be the traffic-delay baseline and <strong>R</strong> be the recency-weighted median community timer.</p>
         <div class="method-table-wrap">
           <table class="method-table">
@@ -111,7 +120,7 @@
         </div>
         <p>Community reports never create a public wait estimate by themselves. A recent usable traffic observation is always required.</p>
 
-        <h2 id="uncertainty">4. Building the displayed range</h2>
+        <h2 id="uncertainty">5. Building the displayed range</h2>
         <p>The blended center is surrounded by an uncertainty spread:</p>
         <div class="method-table-wrap">
           <table class="method-table">
@@ -126,7 +135,7 @@
         <p>The spread is widened when two or more community timers disagree. It also expands when the traffic observation is more than 10 minutes old. Each of those additions is capped at 12 minutes.</p>
         <p>The lower bound is rounded down and the upper bound is rounded up to the nearest five minutes. This is why a calculated center of 26 minutes might appear as a range such as 20–35 minutes.</p>
 
-        <h2 id="freshness">5. Freshness and availability</h2>
+        <h2 id="freshness">6. Freshness and availability</h2>
         <div class="method-table-wrap">
           <table class="method-table">
             <thead><tr><th>Observation age or status</th><th>Public treatment</th></tr></thead>
@@ -141,17 +150,17 @@
         </div>
         <p>The public deployment does not substitute plausible sample wait numbers when live observations are unavailable.</p>
 
-        <h2 id="confidence">6. Signal strength and trend labels</h2>
+        <h2 id="confidence">7. Signal strength and trend labels</h2>
         <p>The site publishes a <strong>signal strength</strong> band rather than a confidence level, because the underlying score measures how much usable input the estimator had—not how accurate the resulting range turned out to be. It considers traffic-data freshness, report count, agreement among reports, and the amount of recent traffic history.</p>
         <p>The score also includes a temporary fixed incident component, because incident-overlap logic is not yet spatially validated.</p>
         <div class="method-note"><strong>Published ceiling:</strong> until the approach geometry has been checked against paired field observations at both entrances, the published band is capped at <em>Medium</em> even when the raw score reaches the top range. A model that has never been compared with a measured gate wait has not earned the word "high."</div>
         <p>The trend label compares the newest traffic delays with older recent traffic delays. A change of at least five minutes is labeled rising or falling; smaller changes are labeled stable.</p>
 
-        <h2 id="outliers">6b. Community reports that disagree with the traffic signal</h2>
+        <h2 id="outliers">7b. Community reports that disagree with the traffic signal</h2>
         <p>Because community timers can carry up to half the weight of a published estimate, a single mistimed or deliberately false report should not be able to move the number. A completed report is used only when it lands within three times the measured traffic delay, with a ten-minute absolute allowance so that low-delay conditions still admit ordinary booth-processing time.</p>
-        <p>Reports outside that range are excluded from the calculation, but they are not ignored. Two or more reports far above what the route segment can explain is the signature of a queue that begins upstream of the fixed route origin—the estimator's principal blind spot. When that pattern appears, the signal strength score is reduced and the condition is recorded in the estimate basis for review during field calibration.</p>
+        <p>Reports outside that range are excluded from the calculation, but they are not ignored. Two or more reports far above what the duration signal can explain may indicate that the queue extends beyond the configured corridor, that the provisional free-flow baseline is wrong, or that the traffic provider has not captured the slowdown. When that pattern appears, the signal strength score is reduced and the condition is recorded in the estimate basis for review during field calibration.</p>
 
-        <h2 id="planning-chart">7. The planning chart is separate</h2>
+        <h2 id="planning-chart">8. The planning chart is separate</h2>
         <p>The hourly planning chart is not a live forecast and does not use the current wait calculation. It starts with manually defined seasonal templates and applies broad multipliers:</p>
         <ul>
           <li>Weekday: 62% of the base pattern.</li>
@@ -164,13 +173,15 @@
 
         <h2 id="limitations">Known limitations and open questions</h2>
         <ul>
-          <li>The fixed route may not extend far enough to capture the back of a very long queue.</li>
+          <li>Even the extended corridor may not reach the back of an exceptional queue.</li>
+          <li>The hourly speed categories may place the congestion boundary differently from the yellow and red styling visible in the consumer Google Maps interface.</li>
+          <li>The provisional free-flow baselines and corridor coordinates have not yet been validated with paired field observations.</li>
           <li>Traffic delay may include congestion unrelated to the entrance booths.</li>
           <li>The relationship between traffic delay and booth wait may differ between Nisqually and White River.</li>
           <li>Community timers are not yet location-verified.</li>
           <li>The current blending percentages have not been calibrated against a large field dataset.</li>
           <li>The uncertainty formula is a beta heuristic, not a statistical confidence interval.</li>
-          <li>Excluding reports that disagree strongly with the traffic signal also suppresses the correct reading in the one case the traffic signal handles worst: a queue extending past the route origin. The exclusion is recorded rather than silent, but until the route is field-validated this remains an unresolved trade-off.</li>
+          <li>Excluding reports that disagree strongly with the traffic signal can suppress a correct report when the route, baseline, or traffic data is wrong. The exclusion is recorded rather than silent, but remains an unresolved calibration trade-off.</li>
           <li>Staffing, payment methods, closures, weather, construction, and unusual events may cause abrupt errors.</li>
           <li>The planning chart requires historical calibration before it should be described as a forecast.</li>
         </ul>
@@ -190,6 +201,7 @@
           <strong>On this page</strong>
           <a href="#summary">Overview</a>
           <a href="#traffic-baseline">Traffic baseline</a>
+          <a href="#queue-boundary">Queue boundary</a>
           <a href="#community-timers">Community timers</a>
           <a href="#blending">Blending and uncertainty</a>
           <a href="#freshness">Freshness and confidence</a>

@@ -496,3 +496,5 @@ footer { padding-block: 38px; background: #08261e; color: white; border-top: 1px
   .methodology-sidebar { grid-template-columns: 1fr; }
   .methodology-actions { display: grid; }
 }
+
+.data-attribution { margin-top: .35rem; color: var(--ink-soft); font-size: .68rem; }

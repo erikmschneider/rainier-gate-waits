@@ -9,7 +9,7 @@ The Python standard-library service hosts the website and API, polls Google Rout
 - Only an explicit allowlist of front-end files is reachable over HTTP; application source, tests, and deployment manifests are not served.
 - The published signal-strength band is capped at Medium until `ESTIMATOR_FIELD_CALIBRATED=true` confirms field validation.
 - Community reports are rate-limited per browser rather than per network address, so shared carrier addresses at an entrance do not block genuine reporters.
-- Reports that diverge sharply from the measured traffic signal are excluded from the estimate and recorded; repeated high outliers flag a possible queue beyond the route origin and lower the score.
+- Reports that diverge sharply from the measured traffic signal are excluded from the estimate and recorded; repeated high outliers flag a possible route, baseline, or traffic-data mismatch and lower the score.
 - Security headers, including a Content Security Policy without inline script, are sent on every response.
 - The public health response omits operational detail; the full payload requires the administrator token.
 - Timer instructions are written for passengers, not drivers (RCW 46.61.672).
@@ -82,7 +82,7 @@ export GOOGLE_ROUTES_API_KEY="your-key"
 python3 server.py
 ```
 
-The API key remains on the server. The Google request asks only for traffic-adjusted duration, static duration, and distance.
+The API key remains on the server. A lower-cost request retrieves traffic-aware duration, historical static duration (diagnostics only), and distance every 15 minutes. A separate hourly request retrieves an encoded traffic-aware polyline and NORMAL/SLOW/TRAFFIC_JAM intervals. The public wait uses current duration minus a route-specific free-flow baseline; it no longer subtracts Google staticDuration.
 
 Before broad promotion, field-test the approach origin and destination coordinates in `server.py`. They remain preliminary and are not survey-grade queue points.
 
@@ -114,6 +114,7 @@ python3 -m unittest discover -s tests -v
 - `PUBLIC_DEPLOYMENT.md` — Render deployment and beta checklist
 - `tests/test_server.py` — backend tests
 - `PRELAUNCH_UPDATE_NOTES.md` — v0.7.0 hardening changes and pre-deploy checklist
+- `QUEUE_AWARE_UPDATE_NOTES.md` — v0.8.0 extended-corridor, free-flow baseline, and queue-boundary changes
 
 ## Methodological status
 
@@ -131,4 +132,4 @@ Feedback records live in the same persistent SQLite database and are included in
 
 ## Public methodology
 
-The calculation is documented at `/methodology.html`. Visitors can submit calculation-specific comments through the existing private feedback workflow. The page documents model version `beta-heuristic-0.6`; the documentation/site release is v0.7.0. See `PRELAUNCH_UPDATE_NOTES.md` for the pre-launch hardening pass.
+The calculation is documented at `/methodology.html`. Visitors can submit calculation-specific comments through the existing private feedback workflow. The page documents model version `beta-heuristic-0.8`; the site release is v0.8.0. See `QUEUE_AWARE_UPDATE_NOTES.md` for the queue-aware estimator changes.

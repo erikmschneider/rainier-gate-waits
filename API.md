@@ -33,7 +33,7 @@ Returns Nisqually and White River. Important fields:
 - `confidenceScore` — 0–100
 - `reports` — distinct recent community reports considered
 - `dataMode` — `live`, `live+reports`, `demo`, `demo+reports`, or `unavailable`
-- `basis` — provider, age, traffic delay, community report summary, and limitations
+- `basis` — provider, age, current full-route duration, diagnostic Google historical duration, free-flow baseline and source, derived traffic delay, route version, recent queue-boundary signal, community report summary, and limitations
 
 `queueMiles` is currently always `null`; the beta does not claim a measured physical queue length.
 
@@ -163,3 +163,12 @@ Disabled unless `RAINIER_ADMIN_TOKEN` is configured. Supply the token in the `X-
   "status": 400
 }
 ```
+
+
+## Queue-aware fields (v0.8.0)
+
+Current entrance objects may include `queueMiles`, `queueStart`, and `queueUpdatedMinutes`. These come from the latest hourly traffic-aware polyline only when it is within the configured display age. They describe an approximate gate-connected congestion boundary, not a directly observed vehicle queue.
+
+The history endpoint reports `delayMinutes` from current route duration minus the stored free-flow baseline. `staticDurationSeconds` is retained as `googleHistoricalDurationSeconds` for diagnostics and is no longer the public baseline. Rows are filtered to the active route version.
+
+Detailed authenticated health output includes route coordinates/version, route duration, provisional or learned baseline, derived delay, polyline age, queue start, and SLOW/TRAFFIC_JAM distances. The public health view continues to hide those operational details.

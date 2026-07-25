@@ -114,3 +114,14 @@ Use `CLOSED_ENTRANCES=white-river` when White River should be manually suppresse
 - Expanded the backend suite from 19 to 28 tests.
 
 Full detail in `PRELAUNCH_UPDATE_NOTES.md`.
+
+## v0.8.0 queue-aware estimator
+
+- Extended the fixed approach corridors and made all route coordinates configurable.
+- Added route versions so new geometry does not mix with old traffic history.
+- Replaced Google historical `staticDuration` subtraction with a route-specific free-flow baseline.
+- Added conservative lower-decile baseline learning after sufficient current-route observations.
+- Added an independent hourly traffic-on-polyline request and gate-connected SLOW/TRAFFIC_JAM analysis.
+- Added approximate queue-start distance to public entrance cards when a recent signal exists.
+- Added detailed route, baseline, duration, queue, and polyline diagnostics to authenticated health output.
+- Added in-place SQLite migration and expanded the test suite to 39 tests.

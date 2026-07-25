@@ -50,6 +50,13 @@ POLL_END_HOUR_LOCAL = max(0, min(23, int(os.environ.get("POLL_END_HOUR_LOCAL", "
 ENABLE_BACKGROUND_POLLING = os.environ.get("ENABLE_BACKGROUND_POLLING", "true").lower() not in {"0", "false", "no"}
 TRUST_PROXY_HEADERS = os.environ.get("TRUST_PROXY_HEADERS", "false").lower() in {"1", "true", "yes"}
 GOOGLE_ROUTES_API_KEY = os.environ.get("GOOGLE_ROUTES_API_KEY", "").strip()
+ENABLE_TRAFFIC_POLYLINE = os.environ.get("ENABLE_TRAFFIC_POLYLINE", "true").lower() in {"1", "true", "yes"}
+TRAFFIC_POLYLINE_INTERVAL_SECONDS = max(3600, int(os.environ.get("TRAFFIC_POLYLINE_INTERVAL_SECONDS", "3600")))
+TRAFFIC_POLYLINE_MAX_AGE_MINUTES = max(15, int(os.environ.get("TRAFFIC_POLYLINE_MAX_AGE_MINUTES", "90")))
+TRAFFIC_POLYLINE_GATE_CONNECTION_METERS = max(0, int(os.environ.get("TRAFFIC_POLYLINE_GATE_CONNECTION_METERS", "800")))
+TRAFFIC_POLYLINE_NORMAL_GAP_METERS = max(0, int(os.environ.get("TRAFFIC_POLYLINE_NORMAL_GAP_METERS", "300")))
+FREE_FLOW_LEARNING_DAYS = max(7, int(os.environ.get("FREE_FLOW_LEARNING_DAYS", "30")))
+FREE_FLOW_LEARNING_MIN_SAMPLES = max(4, int(os.environ.get("FREE_FLOW_LEARNING_MIN_SAMPLES", "12")))
 WSDOT_ACCESS_CODE = os.environ.get("WSDOT_ACCESS_CODE", "").strip()
 ADMIN_TOKEN = os.environ.get("RAINIER_ADMIN_TOKEN", "").strip()
 HASH_SECRET = os.environ.get("RAINIER_HASH_SECRET", secrets.token_hex(16))
@@ -65,7 +72,7 @@ BACKUP_DIR = Path(os.environ.get("RAINIER_BACKUP_DIR", DB_PATH.parent / "backups
 FEEDBACK_RATE_LIMIT_PER_HOUR = max(1, int(os.environ.get("FEEDBACK_RATE_LIMIT_PER_HOUR", "5")))
 FEEDBACK_IDENTIFIER_RETENTION_DAYS = max(1, int(os.environ.get("FEEDBACK_IDENTIFIER_RETENTION_DAYS", "30")))
 FEEDBACK_RETENTION_DAYS = max(FEEDBACK_IDENTIFIER_RETENTION_DAYS, int(os.environ.get("FEEDBACK_RETENTION_DAYS", "365")))
-SITE_VERSION = "0.7.0"
+SITE_VERSION = "0.8.0"
 # The published confidence band stays capped until the approach geometry has
 # been checked against paired field observations at both entrances.
 ESTIMATOR_FIELD_CALIBRATED = os.environ.get("ESTIMATOR_FIELD_CALIBRATED", "false").lower() in {"1", "true", "yes"}
@@ -109,26 +116,58 @@ CLOSED_ENTRANCES = {
 UTC = timezone.utc
 PACIFIC = ZoneInfo("America/Los_Angeles")
 
-# These coordinates are suitable for a starter prototype, not a survey-grade
-# production route definition. Verify each approach segment in the traffic
-# provider's route demo before public launch.
+
+def env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+
+
+def env_int(name: str, default: int, minimum: int = 1) -> int:
+    try:
+        return max(minimum, int(os.environ.get(name, str(default))))
+    except ValueError:
+        return max(minimum, default)
+
+
+# Extended fixed corridors are intentionally longer than the original pilot
+# segments so a queue can grow through the usual approach area without falling
+# outside the request. Every coordinate and provisional free-flow value can be
+# changed in Render without a code deployment. Defaults remain uncalibrated.
 ENTRANCES: dict[str, dict[str, Any]] = {
     "nisqually": {
         "slug": "nisqually",
         "name": "Nisqually Entrance",
         "approach": "From Ashford via WA-706",
-        "origin": {"latitude": 46.7580, "longitude": -122.0080},
-        "destination": {"latitude": 46.7508, "longitude": -121.9175},
+        "origin": {
+            "latitude": env_float("NISQUALLY_ROUTE_ORIGIN_LAT", 46.7580),
+            "longitude": env_float("NISQUALLY_ROUTE_ORIGIN_LNG", -122.0500),
+        },
+        "destination": {
+            "latitude": env_float("NISQUALLY_ROUTE_DESTINATION_LAT", 46.7508),
+            "longitude": env_float("NISQUALLY_ROUTE_DESTINATION_LNG", -121.9175),
+        },
         "route": "706",
+        "route_version": os.environ.get("NISQUALLY_ROUTE_VERSION", "nisqually-extended-v1"),
+        "configured_free_flow_seconds": env_int("NISQUALLY_FREE_FLOW_SECONDS", 720, 60),
         "seasonal": False,
     },
     "white-river": {
         "slug": "white-river",
         "name": "White River Entrance",
         "approach": "From Enumclaw via WA-410",
-        "origin": {"latitude": 46.9100, "longitude": -121.6040},
-        "destination": {"latitude": 46.9023, "longitude": -121.5358},
+        "origin": {
+            "latitude": env_float("WHITE_RIVER_ROUTE_ORIGIN_LAT", 46.9160),
+            "longitude": env_float("WHITE_RIVER_ROUTE_ORIGIN_LNG", -121.6500),
+        },
+        "destination": {
+            "latitude": env_float("WHITE_RIVER_ROUTE_DESTINATION_LAT", 46.9023),
+            "longitude": env_float("WHITE_RIVER_ROUTE_DESTINATION_LNG", -121.5358),
+        },
         "route": "410",
+        "route_version": os.environ.get("WHITE_RIVER_ROUTE_VERSION", "white-river-extended-v1"),
+        "configured_free_flow_seconds": env_int("WHITE_RIVER_FREE_FLOW_SECONDS", 630, 60),
         "seasonal": True,
     },
 }
@@ -171,11 +210,35 @@ create table if not exists traffic_snapshots (
   static_duration_seconds integer not null,
   distance_meters integer,
   provider text not null,
+  route_version text,
+  free_flow_baseline_seconds integer,
+  derived_delay_seconds integer,
   raw_payload text,
   created_at text not null
 );
 create index if not exists traffic_snapshots_entrance_time_idx
   on traffic_snapshots (entrance_slug, observed_at desc);
+
+create table if not exists traffic_polyline_snapshots (
+  id integer primary key autoincrement,
+  entrance_slug text not null references entrances(slug),
+  observed_at text not null,
+  route_version text not null,
+  distance_meters integer,
+  queue_start_lat real,
+  queue_start_lng real,
+  queue_distance_meters integer,
+  slow_distance_meters integer not null default 0,
+  jam_distance_meters integer not null default 0,
+  congestion_start_index integer,
+  congestion_end_index integer,
+  encoded_polyline text,
+  speed_intervals_json text not null,
+  raw_payload text,
+  created_at text not null
+);
+create index if not exists traffic_polyline_entrance_time_idx
+  on traffic_polyline_snapshots (entrance_slug, observed_at desc);
 
 create table if not exists condition_events (
   id integer primary key autoincrement,
@@ -350,6 +413,16 @@ def initialize_database() -> None:
             conn.execute("alter table wait_reports add column report_secret_hash text")
         if "device_hash" not in wait_report_columns:
             conn.execute("alter table wait_reports add column device_hash text")
+        traffic_columns = {
+            row["name"] for row in conn.execute("pragma table_info(traffic_snapshots)").fetchall()
+        }
+        for column, definition in {
+            "route_version": "text",
+            "free_flow_baseline_seconds": "integer",
+            "derived_delay_seconds": "integer",
+        }.items():
+            if column not in traffic_columns:
+                conn.execute(f"alter table traffic_snapshots add column {column} {definition}")
         conn.execute("update entrances set active=0, updated_at=?", (now,))
         for entry in ENTRANCES.values():
             conn.execute(
@@ -456,7 +529,7 @@ def http_json(
 ) -> Any:
     payload = None if body is None else json.dumps(body).encode('utf-8')
     request = urllib.request.Request(url, data=payload, method=method)
-    request.add_header('User-Agent', 'RainierGateWaits/0.4 (+public pilot)')
+    request.add_header('User-Agent', 'RainierGateWaits/0.8 (+public beta)')
     if body is not None:
         request.add_header('Content-Type', 'application/json')
     request_headers = headers or {}
@@ -474,6 +547,37 @@ def http_json(
         raise RuntimeError(format_http_error(exc, sensitive_values=sensitive_values)) from exc
 
 
+def learned_free_flow_baseline(entrance_slug: str) -> tuple[int, str, int]:
+    """Return a conservative route-specific free-flow baseline.
+
+    The configured baseline is available immediately. After enough observations
+    exist for the current route version, the lower decile of live durations can
+    lower (but never raise) that baseline. Using a route version prevents older,
+    shorter corridor observations from contaminating a new corridor.
+    """
+    entry = ENTRANCES[entrance_slug]
+    configured = int(entry["configured_free_flow_seconds"])
+    cutoff = iso(utc_now() - timedelta(days=FREE_FLOW_LEARNING_DAYS))
+    with database() as conn:
+        rows = conn.execute(
+            """
+            select traffic_duration_seconds from traffic_snapshots
+            where entrance_slug=? and provider='google-routes'
+              and route_version=? and observed_at>=?
+            order by traffic_duration_seconds asc
+            """,
+            (entrance_slug, entry["route_version"], cutoff),
+        ).fetchall()
+    values = [int(row["traffic_duration_seconds"]) for row in rows]
+    if len(values) < FREE_FLOW_LEARNING_MIN_SAMPLES:
+        return configured, "configured-provisional", len(values)
+    index = max(0, math.floor((len(values) - 1) * 0.10))
+    learned = values[index]
+    baseline = min(configured, learned)
+    source = "learned-lower-decile" if baseline < configured else "configured-conservative-floor"
+    return max(60, baseline), source, len(values)
+
+
 def store_traffic_snapshot(
     entrance_slug: str,
     observed_at: datetime,
@@ -482,19 +586,29 @@ def store_traffic_snapshot(
     distance_meters: int | None,
     provider: str,
     raw_payload: Any,
+    *,
+    route_version: str | None = None,
+    free_flow_baseline_seconds: int | None = None,
 ) -> None:
+    entry = ENTRANCES[entrance_slug]
+    route_version = route_version or entry["route_version"]
+    if free_flow_baseline_seconds is None:
+        free_flow_baseline_seconds = int(entry["configured_free_flow_seconds"])
+    derived_delay_seconds = max(0, int(traffic_seconds) - int(free_flow_baseline_seconds))
     with database() as conn:
         conn.execute(
             """
             insert into traffic_snapshots (
               entrance_slug, observed_at, traffic_duration_seconds,
               static_duration_seconds, distance_meters, provider,
+              route_version, free_flow_baseline_seconds, derived_delay_seconds,
               raw_payload, created_at
-            ) values (?, ?, ?, ?, ?, ?, ?, ?)
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 entrance_slug, iso(observed_at), traffic_seconds, static_seconds,
-                distance_meters, provider, json.dumps(raw_payload, separators=(",", ":")), iso(),
+                distance_meters, provider, route_version, free_flow_baseline_seconds,
+                derived_delay_seconds, json.dumps(raw_payload, separators=(",", ":")), iso(),
             ),
         )
 
@@ -526,6 +640,14 @@ def poll_google_routes() -> list[str]:
                 body=body,
             )
             route = data["routes"][0]
+            free_flow_seconds, baseline_source, baseline_samples = learned_free_flow_baseline(slug)
+            raw = dict(data)
+            raw["rainierEstimator"] = {
+                "routeVersion": entry["route_version"],
+                "freeFlowBaselineSeconds": free_flow_seconds,
+                "freeFlowBaselineSource": baseline_source,
+                "freeFlowSampleCount": baseline_samples,
+            }
             store_traffic_snapshot(
                 slug,
                 utc_now(),
@@ -533,11 +655,249 @@ def poll_google_routes() -> list[str]:
                 parse_google_duration(route["staticDuration"]),
                 route.get("distanceMeters"),
                 "google-routes",
-                data,
+                raw,
+                route_version=entry["route_version"],
+                free_flow_baseline_seconds=free_flow_seconds,
             )
         except Exception as exc:  # keep polling the other entrances
             errors.append(f"{slug}: {exc}")
     return errors
+
+
+def decode_google_polyline(encoded: str) -> list[tuple[float, float]]:
+    points: list[tuple[float, float]] = []
+    latitude = 0
+    longitude = 0
+    index = 0
+    while index < len(encoded):
+        values: list[int] = []
+        for _ in range(2):
+            result = 0
+            shift = 0
+            while True:
+                if index >= len(encoded):
+                    raise ValueError("Truncated encoded polyline")
+                value = ord(encoded[index]) - 63
+                index += 1
+                result |= (value & 0x1F) << shift
+                shift += 5
+                if value < 0x20:
+                    break
+            values.append(~(result >> 1) if result & 1 else result >> 1)
+        latitude += values[0]
+        longitude += values[1]
+        points.append((latitude / 1e5, longitude / 1e5))
+    return points
+
+
+def haversine_meters(a: tuple[float, float], b: tuple[float, float]) -> float:
+    lat1, lng1 = map(math.radians, a)
+    lat2, lng2 = map(math.radians, b)
+    dlat = lat2 - lat1
+    dlng = lng2 - lng1
+    value = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlng / 2) ** 2
+    return 6371008.8 * 2 * math.asin(min(1.0, math.sqrt(value)))
+
+
+def polyline_segment_lengths(points: list[tuple[float, float]]) -> list[float]:
+    return [haversine_meters(points[index], points[index + 1]) for index in range(len(points) - 1)]
+
+
+def interval_distance(segment_lengths: list[float], start: int, end: int) -> float:
+    start = max(0, min(start, len(segment_lengths)))
+    end = max(start, min(end, len(segment_lengths)))
+    return sum(segment_lengths[start:end])
+
+
+def analyze_gate_connected_congestion(
+    points: list[tuple[float, float]],
+    intervals: list[dict[str, Any]],
+    *,
+    gate_connection_meters: int = TRAFFIC_POLYLINE_GATE_CONNECTION_METERS,
+    normal_gap_meters: int = TRAFFIC_POLYLINE_NORMAL_GAP_METERS,
+) -> dict[str, Any]:
+    """Find the SLOW/JAM block connected to the destination end of a route."""
+    if len(points) < 2:
+        raise ValueError("Traffic polyline contains too few points")
+    segment_lengths = polyline_segment_lengths(points)
+    last_point_index = len(points) - 1
+    normalized: list[dict[str, Any]] = []
+    previous_end = 0
+    for raw in intervals:
+        start = int(raw.get("startPolylinePointIndex", previous_end) or 0)
+        end = int(raw.get("endPolylinePointIndex", last_point_index) or last_point_index)
+        start = max(0, min(start, last_point_index))
+        end = max(start, min(end, last_point_index))
+        speed = str(raw.get("speed") or "SPEED_UNSPECIFIED")
+        length = interval_distance(segment_lengths, start, end)
+        normalized.append({"start": start, "end": end, "speed": speed, "length": length})
+        previous_end = end
+    if not normalized:
+        return {
+            "queueStartIndex": None, "queueEndIndex": None, "queueStart": None,
+            "queueDistanceMeters": None, "slowDistanceMeters": 0, "jamDistanceMeters": 0,
+        }
+
+    congested_speeds = {"SLOW", "TRAFFIC_JAM"}
+    downstream_normal = 0.0
+    pending_normal = 0.0
+    found = False
+    queue_start_index: int | None = None
+    queue_end_index: int | None = None
+    slow_distance = 0.0
+    jam_distance = 0.0
+
+    for interval in reversed(normalized):
+        speed = interval["speed"]
+        length = interval["length"]
+        if not found:
+            if speed in congested_speeds:
+                if downstream_normal > gate_connection_meters:
+                    break
+                found = True
+                queue_start_index = interval["start"]
+                queue_end_index = last_point_index
+                if speed == "SLOW": slow_distance += length
+                else: jam_distance += length
+            else:
+                downstream_normal += length
+                if downstream_normal > gate_connection_meters:
+                    break
+            continue
+
+        if speed in congested_speeds:
+            if pending_normal > normal_gap_meters:
+                break
+            queue_start_index = interval["start"]
+            pending_normal = 0.0
+            if speed == "SLOW": slow_distance += length
+            else: jam_distance += length
+        else:
+            pending_normal += length
+            if pending_normal > normal_gap_meters:
+                break
+
+    if not found or queue_start_index is None:
+        return {
+            "queueStartIndex": None, "queueEndIndex": None, "queueStart": None,
+            "queueDistanceMeters": None, "slowDistanceMeters": 0, "jamDistanceMeters": 0,
+        }
+    queue_distance = interval_distance(segment_lengths, queue_start_index, last_point_index)
+    start_point = points[queue_start_index]
+    return {
+        "queueStartIndex": queue_start_index,
+        "queueEndIndex": queue_end_index,
+        "queueStart": {"latitude": start_point[0], "longitude": start_point[1]},
+        "queueDistanceMeters": round(queue_distance),
+        "slowDistanceMeters": round(slow_distance),
+        "jamDistanceMeters": round(jam_distance),
+    }
+
+
+def store_traffic_polyline_snapshot(
+    entrance_slug: str,
+    observed_at: datetime,
+    route: dict[str, Any],
+    raw_payload: Any,
+) -> dict[str, Any]:
+    entry = ENTRANCES[entrance_slug]
+    encoded = route.get("polyline", {}).get("encodedPolyline") or ""
+    intervals = route.get("travelAdvisory", {}).get("speedReadingIntervals") or []
+    points = decode_google_polyline(encoded)
+    analysis = analyze_gate_connected_congestion(points, intervals)
+    queue_start = analysis["queueStart"] or {}
+    with database() as conn:
+        conn.execute(
+            """
+            insert into traffic_polyline_snapshots (
+              entrance_slug, observed_at, route_version, distance_meters,
+              queue_start_lat, queue_start_lng, queue_distance_meters,
+              slow_distance_meters, jam_distance_meters,
+              congestion_start_index, congestion_end_index,
+              encoded_polyline, speed_intervals_json, raw_payload, created_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                entrance_slug, iso(observed_at), entry["route_version"], route.get("distanceMeters"),
+                queue_start.get("latitude"), queue_start.get("longitude"), analysis["queueDistanceMeters"],
+                analysis["slowDistanceMeters"], analysis["jamDistanceMeters"],
+                analysis["queueStartIndex"], analysis["queueEndIndex"], encoded,
+                json.dumps(intervals, separators=(",", ":")),
+                json.dumps(raw_payload, separators=(",", ":")), iso(),
+            ),
+        )
+    return analysis
+
+
+def traffic_polyline_due(entrance_slug: str, now: datetime | None = None) -> bool:
+    if not ENABLE_TRAFFIC_POLYLINE:
+        return False
+    now = now or utc_now()
+    with database() as conn:
+        row = conn.execute(
+            """
+            select observed_at from traffic_polyline_snapshots
+            where entrance_slug=? and route_version=?
+            order by observed_at desc limit 1
+            """,
+            (entrance_slug, ENTRANCES[entrance_slug]["route_version"]),
+        ).fetchone()
+    if not row:
+        return True
+    return (now - parse_iso(row["observed_at"])).total_seconds() >= TRAFFIC_POLYLINE_INTERVAL_SECONDS
+
+
+def poll_google_traffic_polylines() -> list[str]:
+    if not GOOGLE_ROUTES_API_KEY or not ENABLE_TRAFFIC_POLYLINE:
+        return []
+    errors: list[str] = []
+    endpoint = "https://routes.googleapis.com/directions/v2:computeRoutes"
+    field_mask = (
+        "routes.distanceMeters,routes.polyline.encodedPolyline,"
+        "routes.travelAdvisory.speedReadingIntervals"
+    )
+    for slug, entry in ENTRANCES.items():
+        if not traffic_polyline_due(slug):
+            continue
+        body = {
+            "origin": {"location": {"latLng": entry["origin"]}},
+            "destination": {"location": {"latLng": entry["destination"]}},
+            "travelMode": "DRIVE",
+            "routingPreference": "TRAFFIC_AWARE_OPTIMAL",
+            "computeAlternativeRoutes": False,
+            "extraComputations": ["TRAFFIC_ON_POLYLINE"],
+            "polylineQuality": "HIGH_QUALITY",
+            "polylineEncoding": "ENCODED_POLYLINE",
+            "languageCode": "en-US",
+            "units": "IMPERIAL",
+        }
+        try:
+            data = http_json(
+                endpoint,
+                method="POST",
+                headers={
+                    "X-Goog-Api-Key": GOOGLE_ROUTES_API_KEY,
+                    "X-Goog-FieldMask": field_mask,
+                },
+                body=body,
+            )
+            route = data["routes"][0]
+            store_traffic_polyline_snapshot(slug, utc_now(), route, data)
+        except Exception as exc:
+            errors.append(f"{slug}: {exc}")
+    return errors
+
+
+def latest_traffic_polyline(entrance_slug: str) -> sqlite3.Row | None:
+    with database() as conn:
+        return conn.execute(
+            """
+            select * from traffic_polyline_snapshots
+            where entrance_slug=? and route_version=?
+            order by observed_at desc limit 1
+            """,
+            (entrance_slug, ENTRANCES[entrance_slug]["route_version"]),
+        ).fetchone()
 
 
 def day_type_for(dt: datetime) -> str:
@@ -562,7 +922,7 @@ def seed_demo_snapshots() -> None:
         low, high = template_wait(slug, now)
         center = (low + high) / 2
         delay_minutes = max(0, center + rng.uniform(-3, 3))
-        static_seconds = {"nisqually": 530, "white-river": 430}[slug]
+        static_seconds = int(ENTRANCES[slug]["configured_free_flow_seconds"])
         traffic_seconds = static_seconds + round(delay_minutes * 60)
         distance = {"nisqually": 8500, "white-river": 6200}[slug]
         store_traffic_snapshot(
@@ -654,11 +1014,11 @@ def get_recent_snapshots(conn: sqlite3.Connection, slug: str, minutes: int = 90)
     return conn.execute(
         """
         select * from traffic_snapshots
-        where entrance_slug=? and observed_at>=?
+        where entrance_slug=? and route_version=? and observed_at>=?
         order by observed_at desc
         limit 36
         """,
-        (slug, cutoff),
+        (slug, ENTRANCES[slug]["route_version"], cutoff),
     ).fetchall()
 
 
@@ -729,11 +1089,17 @@ def confidence_label(score: int) -> str:
     return "Low"
 
 
-def calculate_trend(snapshots: list[sqlite3.Row]) -> str:
+def snapshot_delay_seconds(row: sqlite3.Row, slug: str) -> int:
+    baseline = row["free_flow_baseline_seconds"] if "free_flow_baseline_seconds" in row.keys() else None
+    baseline = baseline or ENTRANCES[slug]["configured_free_flow_seconds"]
+    return max(0, int(row["traffic_duration_seconds"]) - int(baseline))
+
+
+def calculate_trend(snapshots: list[sqlite3.Row], slug: str) -> str:
     if len(snapshots) < 3:
         return "Unclear"
-    newest = [max(0, row["traffic_duration_seconds"] - row["static_duration_seconds"]) / 60 for row in snapshots[:2]]
-    older = [max(0, row["traffic_duration_seconds"] - row["static_duration_seconds"]) / 60 for row in snapshots[-2:]]
+    newest = [snapshot_delay_seconds(row, slug) / 60 for row in snapshots[:2]]
+    older = [snapshot_delay_seconds(row, slug) / 60 for row in snapshots[-2:]]
     delta = statistics.mean(newest) - statistics.mean(older)
     if delta >= 5:
         return "Rising"
@@ -755,8 +1121,8 @@ def filter_plausible_reports(
     ordinary booth-processing time.
 
     Implausibly high reports are not merely discarded: several of them at once
-    is the signature of a queue that begins upstream of the fixed route origin,
-    which is the estimator's known blind spot.
+    can indicate that the route, provisional free-flow baseline, or traffic
+    provider is missing part of the real delay.
     """
     if traffic_minutes is None:
         return list(reports), [], []
@@ -785,8 +1151,12 @@ def compute_estimate(slug: str) -> Estimate:
     traffic_delay = None
     traffic_age_minutes = None
     provider = None
+    baseline_seconds = None
+    baseline_source = None
+    baseline_samples = 0
     if latest:
-        traffic_delay = max(0, latest["traffic_duration_seconds"] - latest["static_duration_seconds"])
+        baseline_seconds, baseline_source, baseline_samples = learned_free_flow_baseline(slug)
+        traffic_delay = max(0, latest["traffic_duration_seconds"] - baseline_seconds)
         traffic_age_minutes = max(0, int((utc_now() - parse_iso(latest["observed_at"])).total_seconds() / 60))
         provider = latest["provider"]
 
@@ -809,6 +1179,12 @@ def compute_estimate(slug: str) -> Estimate:
             "traffic_provider": provider,
             "traffic_age_minutes": traffic_age_minutes,
             "traffic_delay_minutes": None,
+            "traffic_duration_minutes": round(latest["traffic_duration_seconds"] / 60, 1) if latest else None,
+            "google_historical_duration_minutes": round(latest["static_duration_seconds"] / 60, 1) if latest else None,
+            "free_flow_baseline_minutes": round(baseline_seconds / 60, 1) if baseline_seconds else None,
+            "free_flow_baseline_source": baseline_source,
+            "free_flow_sample_count": baseline_samples,
+            "route_version": ENTRANCES[slug]["route_version"],
             "community_report_median_minutes": round(report_median, 1) if report_median is not None else None,
             "community_report_count": len(report_minutes),
             "community_reports_received": len(usable_reports),
@@ -869,6 +1245,19 @@ def compute_estimate(slug: str) -> Estimate:
         # explain usually means the line starts upstream of the fixed origin.
         score = max(0, score - 25)
 
+    polyline = latest_traffic_polyline(slug)
+    polyline_age_minutes = None
+    queue_distance_miles = None
+    queue_start = None
+    if polyline:
+        polyline_age_minutes = max(0, int((utc_now() - parse_iso(polyline["observed_at"])).total_seconds() / 60))
+        if polyline_age_minutes <= TRAFFIC_POLYLINE_MAX_AGE_MINUTES and polyline["queue_distance_meters"] is not None:
+            queue_distance_miles = round(polyline["queue_distance_meters"] / 1609.344, 1)
+            queue_start = {
+                "latitude": polyline["queue_start_lat"],
+                "longitude": polyline["queue_start_lng"],
+            }
+
     data_mode = "live" if provider == "google-routes" else "demo"
     if provider == "google-routes" and report_minutes:
         data_mode = "live+reports"
@@ -879,6 +1268,16 @@ def compute_estimate(slug: str) -> Estimate:
         "traffic_provider": provider,
         "traffic_age_minutes": traffic_age_minutes,
         "traffic_delay_minutes": round(traffic_minutes, 1) if traffic_minutes is not None else None,
+        "traffic_duration_minutes": round(latest["traffic_duration_seconds"] / 60, 1) if latest else None,
+        "google_historical_duration_minutes": round(latest["static_duration_seconds"] / 60, 1) if latest else None,
+        "free_flow_baseline_minutes": round(baseline_seconds / 60, 1) if baseline_seconds else None,
+        "free_flow_baseline_source": baseline_source,
+        "free_flow_sample_count": baseline_samples,
+        "route_version": ENTRANCES[slug]["route_version"],
+        "queue_distance_miles": queue_distance_miles,
+        "queue_start": queue_start,
+        "traffic_polyline_age_minutes": polyline_age_minutes,
+        "traffic_polyline_enabled": ENABLE_TRAFFIC_POLYLINE,
         "community_report_median_minutes": round(report_median, 1) if report_median is not None else None,
         "community_report_count": len(report_minutes),
         "community_report_weight": report_weight if report_median is not None else 0,
@@ -887,14 +1286,14 @@ def compute_estimate(slug: str) -> Estimate:
         "community_reports_far_below_traffic_signal": len(low_outliers),
         "possible_queue_beyond_route_origin": queue_beyond_origin_suspected,
         "calibration_status": "field-validated" if ESTIMATOR_FIELD_CALIBRATED else "uncalibrated",
-        "coordinate_notice": "Approach coordinates still require field validation.",
+        "coordinate_notice": "Extended approach coordinates and free-flow baselines remain provisional until field validation.",
     }
     return Estimate(
         low=low,
         median=median,
         high=high,
-        queue_distance_miles=None,
-        trend=calculate_trend(snapshots),
+        queue_distance_miles=queue_distance_miles,
+        trend=calculate_trend(snapshots, slug),
         confidence_score=score,
         confidence_level=confidence_label(score),
         recent_report_count=len(report_minutes),
@@ -923,7 +1322,7 @@ def persist_estimate(slug: str, estimate: Estimate) -> None:
                 estimate.confidence_score, estimate.confidence_level,
                 estimate.recent_report_count, estimate.traffic_delay_seconds,
                 estimate.data_mode, json.dumps(estimate.basis, separators=(",", ":")),
-                "beta-heuristic-0.7",
+                "beta-heuristic-0.8",
             ),
         )
 
@@ -1027,6 +1426,9 @@ def poll_all() -> dict[str, Any]:
         google_errors = poll_google_routes()
         if google_errors:
             errors["google_routes"] = google_errors
+        polyline_errors = poll_google_traffic_polylines()
+        if polyline_errors:
+            errors["google_traffic_polyline"] = polyline_errors
     elif ALLOW_SYNTHETIC_DATA:
         seed_demo_snapshots()
     wsdot_errors = poll_wsdot_alerts()
@@ -1061,8 +1463,12 @@ def current_payload() -> dict[str, Any]:
             estimate = compute_estimate(slug)
             modes.add(estimate.data_mode)
             latest = conn.execute(
-                "select observed_at from traffic_snapshots where entrance_slug=? order by observed_at desc limit 1",
-                (slug,),
+                """
+                select observed_at from traffic_snapshots
+                where entrance_slug=? and route_version=?
+                order by observed_at desc limit 1
+                """,
+                (slug, entry["route_version"]),
             ).fetchone()
             observed_at = latest["observed_at"] if latest else None
             age_minutes = None
@@ -1107,7 +1513,9 @@ def current_payload() -> dict[str, Any]:
                 "min": estimate.low if displayable else None,
                 "median": estimate.median if displayable else None,
                 "max": estimate.high if displayable else None,
-                "queueMiles": None,
+                "queueMiles": estimate.queue_distance_miles if displayable else None,
+                "queueStart": estimate.basis.get("queue_start") if displayable else None,
+                "queueUpdatedMinutes": estimate.basis.get("traffic_polyline_age_minutes") if displayable else None,
                 "trend": estimate.trend if displayable else "Unavailable",
                 "confidence": estimate.confidence_level if displayable else "Unavailable",
                 "confidenceScore": estimate.confidence_score if displayable else 0,
@@ -1199,10 +1607,14 @@ def health_payload(detailed: bool = True) -> dict[str, Any]:
             for slug in ENTRANCES:
                 latest = conn.execute(
                     """
-                    select observed_at, provider from traffic_snapshots
-                    where entrance_slug=? order by observed_at desc limit 1
+                    select observed_at, provider, traffic_duration_seconds,
+                           static_duration_seconds, free_flow_baseline_seconds,
+                           derived_delay_seconds, distance_meters, route_version
+                    from traffic_snapshots
+                    where entrance_slug=? and route_version=?
+                    order by observed_at desc limit 1
                     """,
-                    (slug,),
+                    (slug, ENTRANCES[slug]["route_version"]),
                 ).fetchone()
                 age_minutes = None
                 provider = None
@@ -1219,12 +1631,45 @@ def health_payload(detailed: bool = True) -> dict[str, Any]:
                     freshness = "current"
                 else:
                     freshness = "stale"
+                free_flow_seconds, free_flow_source, free_flow_samples = learned_free_flow_baseline(slug)
+                latest_polyline = conn.execute(
+                    """
+                    select observed_at, queue_start_lat, queue_start_lng, queue_distance_meters,
+                           slow_distance_meters, jam_distance_meters
+                    from traffic_polyline_snapshots
+                    where entrance_slug=? and route_version=?
+                    order by observed_at desc limit 1
+                    """,
+                    (slug, ENTRANCES[slug]["route_version"]),
+                ).fetchone()
+                polyline_age = None
+                if latest_polyline:
+                    polyline_age = max(0, int((now - parse_iso(latest_polyline["observed_at"])).total_seconds() / 60))
                 entrance_health[slug] = {
                     "lastObservationAt": latest["observed_at"] if latest else None,
                     "ageMinutes": age_minutes,
                     "provider": provider,
                     "freshness": freshness,
                     "entranceClosed": entrance_closed,
+                    "routeVersion": ENTRANCES[slug]["route_version"],
+                    "routeOrigin": ENTRANCES[slug]["origin"],
+                    "routeDestination": ENTRANCES[slug]["destination"],
+                    "freeFlowBaselineSeconds": free_flow_seconds,
+                    "freeFlowBaselineSource": free_flow_source,
+                    "freeFlowSampleCount": free_flow_samples,
+                    "lastTrafficPolylineAt": latest_polyline["observed_at"] if latest_polyline else None,
+                    "trafficPolylineAgeMinutes": polyline_age,
+                    "queueStart": ({
+                        "latitude": latest_polyline["queue_start_lat"],
+                        "longitude": latest_polyline["queue_start_lng"],
+                    } if latest_polyline and latest_polyline["queue_start_lat"] is not None else None),
+                    "queueDistanceMeters": latest_polyline["queue_distance_meters"] if latest_polyline else None,
+                    "currentRouteDurationSeconds": latest["traffic_duration_seconds"] if latest else None,
+                    "googleHistoricalDurationSeconds": latest["static_duration_seconds"] if latest else None,
+                    "derivedDelaySeconds": (max(0, latest["traffic_duration_seconds"] - free_flow_seconds) if latest else None),
+                    "routeDistanceMeters": latest["distance_meters"] if latest else None,
+                    "slowDistanceMeters": latest_polyline["slow_distance_meters"] if latest_polyline else None,
+                    "jamDistanceMeters": latest_polyline["jam_distance_meters"] if latest_polyline else None,
                 }
     except Exception as exc:
         database_error = redact_secrets(str(exc))
@@ -1257,6 +1702,9 @@ def health_payload(detailed: bool = True) -> dict[str, Any]:
         "databaseError": database_error,
         "diskFreeMegabytes": disk_free_mb,
         "googleRoutesConfigured": bool(GOOGLE_ROUTES_API_KEY),
+        "trafficPolylineEnabled": ENABLE_TRAFFIC_POLYLINE,
+        "trafficPolylineIntervalSeconds": TRAFFIC_POLYLINE_INTERVAL_SECONDS,
+        "trafficPolylineDisplayMaximumMinutes": TRAFFIC_POLYLINE_MAX_AGE_MINUTES,
         "wsdotConfigured": bool(WSDOT_ACCESS_CODE),
         "syntheticDataAllowed": ALLOW_SYNTHETIC_DATA,
         "reportLocationsAccepted": ACCEPT_REPORT_LOCATIONS,
@@ -1363,12 +1811,13 @@ def history_payload(slug: str, hours: int) -> dict[str, Any]:
         rows = conn.execute(
             """
             select observed_at, traffic_duration_seconds, static_duration_seconds,
-                   distance_meters, provider
+                   distance_meters, provider, route_version,
+                   free_flow_baseline_seconds, derived_delay_seconds
             from traffic_snapshots
-            where entrance_slug=? and observed_at>=?
+            where entrance_slug=? and route_version=? and observed_at>=?
             order by observed_at asc
             """,
-            (slug, cutoff),
+            (slug, ENTRANCES[slug]["route_version"], cutoff),
         ).fetchall()
     return {
         "entrance": slug,
@@ -1378,7 +1827,10 @@ def history_payload(slug: str, hours: int) -> dict[str, Any]:
                 "observedAt": row["observed_at"],
                 "trafficDurationSeconds": row["traffic_duration_seconds"],
                 "staticDurationSeconds": row["static_duration_seconds"],
-                "delayMinutes": round(max(0, row["traffic_duration_seconds"] - row["static_duration_seconds"]) / 60, 1),
+                "delayMinutes": round(snapshot_delay_seconds(row, slug) / 60, 1),
+                "freeFlowBaselineSeconds": row["free_flow_baseline_seconds"],
+                "googleHistoricalDurationSeconds": row["static_duration_seconds"],
+                "routeVersion": row["route_version"],
                 "distanceMeters": row["distance_meters"],
                 "provider": row["provider"],
             }
@@ -2011,10 +2463,24 @@ def main() -> None:
         maybe_backup_database()
     except Exception as exc:
         print(f"[backup] startup backup failed: {redact_secrets(str(exc))}")
-    # Ensure the first page load has observations even before the poller wakes.
+    # Ensure the first page load has a current observation for every route
+    # version, even when the persistent disk contains recent rows from an older
+    # and shorter corridor.
+    initial_poll_needed = False
     with database() as conn:
-        latest = conn.execute("select max(observed_at) as latest from traffic_snapshots").fetchone()["latest"]
-    if within_polling_window() and (not latest or (utc_now() - parse_iso(latest)) > timedelta(minutes=max(10, POLL_SECONDS // 60 * 2))):
+        for slug, entry in ENTRANCES.items():
+            row = conn.execute(
+                """
+                select observed_at from traffic_snapshots
+                where entrance_slug=? and route_version=?
+                order by observed_at desc limit 1
+                """,
+                (slug, entry["route_version"]),
+            ).fetchone()
+            if not row or (utc_now() - parse_iso(row["observed_at"])) > timedelta(minutes=max(10, POLL_SECONDS // 60 * 2)):
+                initial_poll_needed = True
+                break
+    if within_polling_window() and initial_poll_needed:
         poll_all()
     if ENABLE_BACKGROUND_POLLING:
         Poller(name="rainier-data-poller").start()

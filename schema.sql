@@ -21,7 +21,10 @@ create table traffic_snapshots (
   entrance_id uuid not null references entrances(id),
   observed_at timestamptz not null,
   traffic_duration_seconds integer not null,
-  baseline_duration_seconds integer not null,
+  google_historical_duration_seconds integer not null,
+  free_flow_baseline_seconds integer not null,
+  derived_delay_seconds integer not null,
+  route_version text not null,
   distance_meters integer,
   provider text not null,
   provider_observation_id text,
@@ -30,6 +33,26 @@ create table traffic_snapshots (
 );
 create index traffic_snapshots_entrance_time_idx
   on traffic_snapshots (entrance_id, observed_at desc);
+
+create table traffic_polyline_snapshots (
+  id bigserial primary key,
+  entrance_id uuid not null references entrances(id),
+  observed_at timestamptz not null,
+  route_version text not null,
+  distance_meters integer,
+  queue_start geography(point, 4326),
+  queue_distance_meters integer,
+  slow_distance_meters integer not null default 0,
+  jam_distance_meters integer not null default 0,
+  congestion_start_index integer,
+  congestion_end_index integer,
+  encoded_polyline text,
+  speed_intervals jsonb not null,
+  raw_payload jsonb,
+  created_at timestamptz not null default now()
+);
+create index traffic_polyline_entrance_time_idx
+  on traffic_polyline_snapshots (entrance_id, observed_at desc);
 
 create table condition_events (
   id bigserial primary key,

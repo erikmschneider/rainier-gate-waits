@@ -23,6 +23,44 @@ services:
         value: ""
       - key: POLL_INTERVAL_SECONDS
         value: 900
+      - key: ENABLE_TRAFFIC_POLYLINE
+        value: true
+      - key: TRAFFIC_POLYLINE_INTERVAL_SECONDS
+        value: 3600
+      - key: TRAFFIC_POLYLINE_MAX_AGE_MINUTES
+        value: 90
+      - key: TRAFFIC_POLYLINE_GATE_CONNECTION_METERS
+        value: 800
+      - key: TRAFFIC_POLYLINE_NORMAL_GAP_METERS
+        value: 300
+      - key: NISQUALLY_ROUTE_ORIGIN_LAT
+        value: 46.7580
+      - key: NISQUALLY_ROUTE_ORIGIN_LNG
+        value: -122.0500
+      - key: NISQUALLY_ROUTE_DESTINATION_LAT
+        value: 46.7508
+      - key: NISQUALLY_ROUTE_DESTINATION_LNG
+        value: -121.9175
+      - key: NISQUALLY_ROUTE_VERSION
+        value: nisqually-extended-v1
+      - key: NISQUALLY_FREE_FLOW_SECONDS
+        value: 720
+      - key: WHITE_RIVER_ROUTE_ORIGIN_LAT
+        value: 46.9160
+      - key: WHITE_RIVER_ROUTE_ORIGIN_LNG
+        value: -121.6500
+      - key: WHITE_RIVER_ROUTE_DESTINATION_LAT
+        value: 46.9023
+      - key: WHITE_RIVER_ROUTE_DESTINATION_LNG
+        value: -121.5358
+      - key: WHITE_RIVER_ROUTE_VERSION
+        value: white-river-extended-v1
+      - key: WHITE_RIVER_FREE_FLOW_SECONDS
+        value: 630
+      - key: FREE_FLOW_LEARNING_DAYS
+        value: 30
+      - key: FREE_FLOW_LEARNING_MIN_SAMPLES
+        value: 12
       - key: POLL_START_HOUR_LOCAL
         value: 6
       - key: POLL_END_HOUR_LOCAL

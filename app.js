@@ -149,7 +149,22 @@ function sourceLabel(entrance) {
   if (entrance.freshnessStatus === "last-daytime") {
     return "Daytime polling has ended; this is the last recent observation, not a live reading.";
   }
-  return "Approach traffic delay; physical queue length is not measured in this beta.";
+  if (Number.isFinite(entrance.queueMiles)) {
+    return `Traffic speed categories suggest congestion begins about ${entrance.queueMiles.toFixed(1)} miles before the entrance. The boundary is approximate.`;
+  }
+  if (Number.isFinite(entrance.queueUpdatedMinutes)) {
+    return "The latest hourly traffic scan did not identify a gate-connected slow or jammed segment. The wait still uses full-route travel time.";
+  }
+  return "Wait is based on current full-route travel time minus a provisional free-flow baseline.";
+}
+
+function queueSignalLabel(entrance) {
+  if (!isDisplayable(entrance)) return "Unavailable";
+  if (Number.isFinite(entrance.queueMiles)) {
+    return `Starts ~${entrance.queueMiles.toFixed(1)} mi out`;
+  }
+  if (Number.isFinite(entrance.queueUpdatedMinutes)) return "No connected slowdown";
+  return "Awaiting hourly scan";
 }
 
 function renderEntranceCards() {
@@ -179,6 +194,7 @@ function renderEntranceCards() {
           <div><span>Trend</span><strong>${escapeHtml(displayable ? entrance.trend : "Unavailable")}</strong></div>
           <div><span>Signal strength</span><strong>${escapeHtml(displayable ? entrance.confidence : "Unavailable")}${displayable && Number.isFinite(entrance.confidenceScore) ? ` · ${entrance.confidenceScore}` : ""}</strong></div>
           <div><span>Community reports</span><strong>${Number(entrance.reports) || 0}</strong></div>
+          <div><span>Queue signal</span><strong>${escapeHtml(queueSignalLabel(entrance))}</strong></div>
           <div><span>Observation</span><strong>${escapeHtml(freshnessLabel(entrance))}</strong></div>
         </div>
         <button class="feedback-card-link" type="button" data-feedback-entrance="${escapeHtml(entrance.id)}">Report an inaccurate estimate</button>

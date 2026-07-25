@@ -56,8 +56,9 @@ Suggested endpoints:
 
 For the public pilot, run every 15 minutes from 6:00 a.m. through 7:59 p.m. Pacific:
 
-1. Request traffic-aware travel time for each fixed approach segment.
-2. Store traffic-aware duration, static duration, distance, and vendor timestamp. Do not request traffic-on-polyline unless a future feature actually needs it.
+1. Request traffic-aware travel time for each extended fixed approach corridor every 15 minutes.
+2. Store traffic-aware duration, historical static duration for diagnostics, route version, free-flow baseline, derived delay, distance, and vendor timestamp.
+3. Once per hour, request a traffic-aware polyline and speed intervals, then derive the SLOW/TRAFFIC_JAM block connected to the gate.
 3. Fetch official alerts and road incidents.
 4. Calculate an initial delay signal.
 5. Blend it conservatively with recent community-submitted visitor reports.
@@ -76,9 +77,9 @@ Run nightly and after substantial new data:
 
 ### Layer A: traffic delay
 
-`approach_delay = traffic_duration - baseline_duration`
+`approach_delay = max(0, traffic_duration - free_flow_baseline)`
 
-The baseline should be learned by entrance, season, direction, and time band rather than treated as one permanent number.
+The current implementation starts with a configurable entrance-specific free-flow baseline and, after enough route-version-matched samples, may lower it to the lower decile of recent live durations. Future calibration can expand this to season and time bands.
 
 ### Layer B: report calibration
 

@@ -29,6 +29,7 @@ class ServerTests(unittest.TestCase):
         with server.database() as conn:
             conn.execute("delete from wait_estimates")
             conn.execute("delete from wait_reports")
+            conn.execute("delete from traffic_polyline_snapshots")
             conn.execute("delete from traffic_snapshots")
             conn.execute("delete from condition_events")
             conn.execute("delete from feedback_submissions")
@@ -152,6 +153,151 @@ class ServerTests(unittest.TestCase):
             )
             self.assertNotIn("extraComputations", kwargs["body"])
             self.assertNotIn("polylineQuality", kwargs["body"])
+
+    def test_wait_uses_free_flow_baseline_not_google_static_duration(self):
+        entry = server.ENTRANCES["nisqually"]
+        original = entry["configured_free_flow_seconds"]
+        try:
+            entry["configured_free_flow_seconds"] = 600
+            server.store_traffic_snapshot(
+                "nisqually", server.utc_now(), 1800, 1500, 9000,
+                "google-routes", {"test": True}, free_flow_baseline_seconds=600,
+            )
+            estimate = server.compute_estimate("nisqually")
+        finally:
+            entry["configured_free_flow_seconds"] = original
+        self.assertEqual(estimate.traffic_delay_seconds, 1200)
+        self.assertEqual(estimate.basis["traffic_delay_minutes"], 20.0)
+        self.assertEqual(estimate.basis["google_historical_duration_minutes"], 25.0)
+
+    def test_learned_baseline_uses_only_current_route_version(self):
+        entry = server.ENTRANCES["nisqually"]
+        original = entry["configured_free_flow_seconds"]
+        try:
+            entry["configured_free_flow_seconds"] = 720
+            now = server.utc_now()
+            # An old-route row must not influence the new corridor baseline.
+            server.store_traffic_snapshot(
+                "nisqually", now, 300, 300, 5000, "google-routes", {},
+                route_version="legacy-short-route", free_flow_baseline_seconds=300,
+            )
+            for index, duration in enumerate([650, 660, 670, 680]):
+                server.store_traffic_snapshot(
+                    "nisqually", now + timedelta(seconds=index), duration, 700, 9000,
+                    "google-routes", {}, route_version=entry["route_version"],
+                    free_flow_baseline_seconds=720,
+                )
+            with mock.patch.object(server, "FREE_FLOW_LEARNING_MIN_SAMPLES", 4):
+                baseline, source, count = server.learned_free_flow_baseline("nisqually")
+        finally:
+            entry["configured_free_flow_seconds"] = original
+        self.assertEqual(baseline, 650)
+        self.assertEqual(source, "learned-lower-decile")
+        self.assertEqual(count, 4)
+
+    def test_google_polyline_decoder_matches_reference_coordinates(self):
+        points = server.decode_google_polyline("_p~iF~ps|U_ulLnnqC_mqNvxq`@")
+        self.assertEqual(len(points), 3)
+        self.assertAlmostEqual(points[0][0], 38.5, places=5)
+        self.assertAlmostEqual(points[0][1], -120.2, places=5)
+        self.assertAlmostEqual(points[2][0], 43.252, places=5)
+        self.assertAlmostEqual(points[2][1], -126.453, places=5)
+
+    def test_polyline_scan_is_not_due_again_within_the_hour(self):
+        with server.database() as conn:
+            conn.execute(
+                """
+                insert into traffic_polyline_snapshots (
+                  entrance_slug, observed_at, route_version, distance_meters,
+                  slow_distance_meters, jam_distance_meters,
+                  encoded_polyline, speed_intervals_json, raw_payload, created_at
+                ) values ('nisqually', ?, ?, 1000, 0, 0, 'encoded', '[]', '{}', ?)
+                """,
+                (server.iso(), server.ENTRANCES["nisqually"]["route_version"], server.iso()),
+            )
+        with mock.patch.object(server, "ENABLE_TRAFFIC_POLYLINE", True):
+            self.assertFalse(server.traffic_polyline_due("nisqually"))
+
+    def test_gate_connected_congestion_ignores_unrelated_upstream_traffic(self):
+        # Roughly 111 meters between each point at the equator.
+        points = [(0.0, index / 1000) for index in range(8)]
+        intervals = [
+            {"endPolylinePointIndex": 2, "speed": "TRAFFIC_JAM"},
+            {"startPolylinePointIndex": 2, "endPolylinePointIndex": 5, "speed": "NORMAL"},
+            {"startPolylinePointIndex": 5, "endPolylinePointIndex": 7, "speed": "SLOW"},
+        ]
+        result = server.analyze_gate_connected_congestion(
+            points, intervals, gate_connection_meters=300, normal_gap_meters=150,
+        )
+        self.assertEqual(result["queueStartIndex"], 5)
+        self.assertGreater(result["queueDistanceMeters"], 200)
+        self.assertGreater(result["slowDistanceMeters"], 200)
+        self.assertEqual(result["jamDistanceMeters"], 0)
+
+    def test_congestion_too_far_from_gate_is_not_reported_as_queue(self):
+        points = [(0.0, index / 1000) for index in range(10)]
+        intervals = [
+            {"endPolylinePointIndex": 2, "speed": "TRAFFIC_JAM"},
+            {"startPolylinePointIndex": 2, "endPolylinePointIndex": 9, "speed": "NORMAL"},
+        ]
+        result = server.analyze_gate_connected_congestion(
+            points, intervals, gate_connection_meters=300, normal_gap_meters=150,
+        )
+        self.assertIsNone(result["queueStartIndex"])
+        self.assertIsNone(result["queueDistanceMeters"])
+
+    def test_traffic_polyline_request_uses_hourly_enterprise_fields(self):
+        captured = []
+        fake_route = {
+            "distanceMeters": 1000,
+            "polyline": {"encodedPolyline": "}boeF~zbjVAg@EmB`GWHlD"},
+            "travelAdvisory": {"speedReadingIntervals": [
+                {"endPolylinePointIndex": 1, "speed": "NORMAL"},
+                {"startPolylinePointIndex": 1, "endPolylinePointIndex": 2, "speed": "SLOW"},
+                {"startPolylinePointIndex": 2, "endPolylinePointIndex": 4, "speed": "NORMAL"},
+            ]},
+        }
+
+        def fake_http_json(url, **kwargs):
+            captured.append((url, kwargs))
+            return {"routes": [fake_route]}
+
+        with mock.patch.object(server, "GOOGLE_ROUTES_API_KEY", "test-key"), \
+             mock.patch.object(server, "ENABLE_TRAFFIC_POLYLINE", True), \
+             mock.patch.object(server, "traffic_polyline_due", return_value=True), \
+             mock.patch.object(server, "http_json", side_effect=fake_http_json):
+            errors = server.poll_google_traffic_polylines()
+
+        self.assertEqual(errors, [])
+        self.assertEqual(len(captured), 2)
+        for _, kwargs in captured:
+            self.assertEqual(kwargs["body"]["extraComputations"], ["TRAFFIC_ON_POLYLINE"])
+            self.assertEqual(kwargs["body"]["polylineQuality"], "HIGH_QUALITY")
+            self.assertIn("routes.polyline.encodedPolyline", kwargs["headers"]["X-Goog-FieldMask"])
+            self.assertIn("routes.travelAdvisory.speedReadingIntervals", kwargs["headers"]["X-Goog-FieldMask"])
+
+    def test_recent_polyline_queue_is_exposed_with_estimate(self):
+        server.store_traffic_snapshot(
+            "nisqually", server.utc_now(), 1500, 1000, 9000,
+            "google-routes", {}, free_flow_baseline_seconds=720,
+        )
+        with server.database() as conn:
+            conn.execute(
+                """
+                insert into traffic_polyline_snapshots (
+                  entrance_slug, observed_at, route_version, distance_meters,
+                  queue_start_lat, queue_start_lng, queue_distance_meters,
+                  slow_distance_meters, jam_distance_meters,
+                  congestion_start_index, congestion_end_index,
+                  encoded_polyline, speed_intervals_json, raw_payload, created_at
+                ) values ('nisqually', ?, ?, 9000, 46.75, -122.0, 3219,
+                          1600, 1200, 3, 10, 'encoded', '[]', '{}', ?)
+                """,
+                (server.iso(), server.ENTRANCES["nisqually"]["route_version"], server.iso()),
+            )
+        item = next(entry for entry in server.current_payload()["entrances"] if entry["id"] == "nisqually")
+        self.assertEqual(item["queueMiles"], 2.0)
+        self.assertEqual(item["queueStart"]["latitude"], 46.75)
 
     def test_public_polling_window_defaults(self):
         self.assertEqual(server.POLL_SECONDS, 900)

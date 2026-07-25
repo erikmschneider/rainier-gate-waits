@@ -25,7 +25,7 @@ At two Google route requests every 15 minutes for 14 hours per day, the theoreti
 4. Let Render redeploy automatically.
 5. Confirm that the existing persistent disk remains attached at `/data`.
 
-The database initializer performs in-place migrations for timer tokens and the feedback table. Existing traffic history and completed reports remain intact.
+The database initializer performs in-place migrations for timer tokens, feedback, route-version/baseline snapshot columns, and hourly traffic-polyline storage. Existing traffic history and completed reports remain intact; old traffic rows are not mixed with a new route version.
 
 ## Required Render settings
 
@@ -55,7 +55,7 @@ The optional `WSDOT_ACCESS_CODE` can be added later. The beta currently uses dir
 4. Store the key only in Render.
 5. Set conservative quotas and billing alerts.
 
-The current request uses traffic-adjusted duration, static duration, and distance without `TRAFFIC_ON_POLYLINE`.
+The 15-minute request uses traffic-adjusted duration, historical static duration for diagnostics, and distance. A separate hourly request uses `TRAFFIC_ON_POLYLINE` to derive an approximate gate-connected congestion boundary. Disable it independently with `ENABLE_TRAFFIC_POLYLINE=false` if billing or API permissions require a temporary rollback.
 
 ## Verify the hardening (v0.7.0)
 
@@ -127,3 +127,12 @@ A small closed beta can begin before full calibration, but broad public promotio
 - Field-calibrated route geometry and estimator adjustments
 - Optional location verification for community timers
 - A public version history or change log beyond the current methodology-page version label
+
+
+## Verify the queue-aware release (v0.8.0)
+
+1. Confirm Render has the new route-coordinate, route-version, free-flow, and polyline environment values.
+2. After deploy, inspect authenticated `/api/v1/health` and verify each entrance has the expected route version and a new current-route observation.
+3. Confirm `derivedDelaySeconds` equals current route duration minus the free-flow baseline, not current duration minus Google historical duration.
+4. Confirm an hourly polyline row appears and that a polyline error does not stop the next duration observation.
+5. Compare `queueStart` and `queueDistanceMeters` with Google Maps and a field observation before treating the boundary as calibrated.
