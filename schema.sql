@@ -53,6 +53,8 @@ create table wait_reports (
   id uuid primary key default gen_random_uuid(),
   entrance_id uuid not null references entrances(id),
   anonymous_session_hash text,
+  device_hash text,
+  report_secret_hash text,
   started_at timestamptz not null,
   completed_at timestamptz,
   wait_seconds integer,

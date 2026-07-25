@@ -388,6 +388,66 @@ class ServerTests(unittest.TestCase):
                     offenders.append(f"{name}:{number}")
         self.assertEqual(offenders, [], f"inline style attributes will be blocked: {offenders}")
 
+    def test_retention_clears_every_report_identifier(self):
+        """The device hash is a new identifier and must expire with the others."""
+        old = server.iso(server.utc_now() - timedelta(days=server.REPORT_IDENTIFIER_RETENTION_DAYS + 1))
+        with server.database() as conn:
+            conn.execute(
+                """
+                insert into wait_reports (
+                  id, entrance_slug, anonymous_client_hash, report_secret_hash, device_hash,
+                  started_at, completed_at, wait_seconds, confirmation_status, quality_score,
+                  created_at, updated_at
+                ) values ('aged', 'nisqually', 'client', 'secret', 'device',
+                          ?, ?, 900, 'completed', 80, ?, ?)
+                """,
+                (old, old, old, old),
+            )
+        server.cleanup_old_reports()
+        with server.database() as conn:
+            row = conn.execute("select * from wait_reports where id='aged'").fetchone()
+        self.assertIsNone(row["anonymous_client_hash"])
+        self.assertIsNone(row["report_secret_hash"])
+        self.assertIsNone(row["device_hash"])
+        # The observation itself is retained; only the identifiers are removed.
+        self.assertEqual(row["wait_seconds"], 900)
+
+    def test_live_server_head_allowlist_and_headers(self):
+        """End-to-end check over a real socket.
+
+        Header and allowlist behaviour cannot be verified by calling the payload
+        functions directly, and this is the layer where a public deployment is
+        actually exposed.
+        """
+        import threading
+        import urllib.request
+        from http.server import ThreadingHTTPServer
+
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{httpd.server_address[1]}"
+        try:
+            # Uptime monitors probe with HEAD.
+            request = urllib.request.Request(f"{base}/", method="HEAD")
+            with urllib.request.urlopen(request, timeout=10) as response:
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.read(), b"")
+                self.assertIn("frame-ancestors 'none'", response.headers["Content-Security-Policy"])
+                self.assertEqual(response.headers["X-Frame-Options"], "DENY")
+                self.assertEqual(response.headers["Referrer-Policy"], "no-referrer")
+
+            with urllib.request.urlopen(f"{base}/", timeout=10) as response:
+                self.assertIn(b"Rainier Gate Waits", response.read())
+
+            for private in ("/server.py", "/README.md", "/render.yaml", "/tests/test_server.py"):
+                with self.assertRaises(urllib.error.HTTPError) as caught:
+                    urllib.request.urlopen(f"{base}{private}", timeout=10)
+                self.assertEqual(caught.exception.code, 404, private)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
     def _fake_report_rows(self, minutes: list[float]):
         completed = server.iso(server.utc_now())
         with server.database() as conn:

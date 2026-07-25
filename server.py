@@ -923,13 +923,12 @@ def persist_estimate(slug: str, estimate: Estimate) -> None:
                 estimate.confidence_score, estimate.confidence_level,
                 estimate.recent_report_count, estimate.traffic_delay_seconds,
                 estimate.data_mode, json.dumps(estimate.basis, separators=(",", ":")),
-                "beta-heuristic-0.6",
+                "beta-heuristic-0.7",
             ),
         )
 
 
 def cleanup_old_reports() -> dict[str, int]:
-    # Device hashes are cleared on the same schedule as the other identifiers.
     abandoned_cutoff = iso(utc_now() - timedelta(hours=ABANDONED_REPORT_RETENTION_HOURS))
     identifier_cutoff = iso(utc_now() - timedelta(days=REPORT_IDENTIFIER_RETENTION_DAYS))
     with database() as conn:
@@ -937,12 +936,18 @@ def cleanup_old_reports() -> dict[str, int]:
             "delete from wait_reports where completed_at is null and created_at<?",
             (abandoned_cutoff,),
         ).rowcount
+        # Every identifier attached to a completed report is cleared on the same
+        # schedule, including the per-browser device hash.
         anonymized = conn.execute(
             """
             update wait_reports
-            set anonymous_client_hash=null, report_secret_hash=null, updated_at=?
+            set anonymous_client_hash=null, report_secret_hash=null, device_hash=null, updated_at=?
             where completed_at is not null and completed_at<?
-              and (anonymous_client_hash is not null or report_secret_hash is not null)
+              and (
+                anonymous_client_hash is not null
+                or report_secret_hash is not null
+                or device_hash is not null
+              )
             """,
             (iso(), identifier_cutoff),
         ).rowcount
@@ -1772,6 +1777,17 @@ class Handler(BaseHTTPRequestHandler):
     sys_version = ""
     # Keep-alive matters on slow mobile connections near the park entrances.
     protocol_version = "HTTP/1.1"
+    # ...but an idle keep-alive connection must not hold a worker thread forever.
+    timeout = 30
+
+    def write_body(self, body: bytes) -> None:
+        """Write the response body unless this is a HEAD request."""
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        # Uptime monitors commonly probe with HEAD; without this they see 501.
+        self.do_GET()
 
     def apply_common_headers(self) -> None:
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -1807,7 +1823,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.apply_common_headers()
         self.end_headers()
-        self.wfile.write(body)
+        self.write_body(body)
 
     def send_error_json(self, status: int, message: str) -> None:
         self.send_json({"error": message, "status": status}, status)
@@ -1820,7 +1836,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.apply_common_headers()
         self.end_headers()
-        self.wfile.write(body)
+        self.write_body(body)
 
     def has_admin_token(self) -> bool:
         supplied = self.headers.get("X-Admin-Token", "")
@@ -1967,7 +1983,7 @@ class Handler(BaseHTTPRequestHandler):
         self.apply_common_headers()
         self.send_header("Cache-Control", "no-cache" if candidate.suffix in {".html", ".js", ".css"} else "public, max-age=3600")
         self.end_headers()
-        self.wfile.write(body)
+        self.write_body(body)
 
 
 def query_int(query: dict[str, list[str]], key: str, default: int, minimum: int, maximum: int) -> int:

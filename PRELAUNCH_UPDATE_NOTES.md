@@ -60,6 +60,8 @@ This trade-off is documented honestly in `methodology.html`: the filter suppress
 - `protocol_version = "HTTP/1.1"` enables keep-alive.
 - Static responses are gzipped when the client accepts it; the homepage drops from roughly 19 KB to 5.8 KB.
 - The server banner no longer advertises the Python version.
+- `Handler.timeout = 30` so an idle keep-alive connection cannot hold a worker thread indefinitely.
+- Added `do_HEAD`. Without it, HEAD probes returned 501 and most uptime monitors would have reported the site down.
 
 ## 7. Public health endpoint trimmed
 
@@ -75,6 +77,14 @@ This trade-off is documented honestly in `methodology.html`: the filter suppress
 - Added Open Graph and Twitter card metadata, `favicon.svg`, `og-image.png`, canonical URL, and `robots.txt` disallowing `/admin-feedback.html` and `/api/`.
 - Added a "What you need at the gate" panel: no timed-entry reservation for the 2026 season, the entrance fee still applies, and parking is actively managed. Verify each season before the site reopens for summer.
 - The privacy notice now routes questions and removal requests through the beta feedback form (`index.html?feedback=general`), which preselects the general category and offers an optional contact field. No email address is published, so there is no unmonitored mailbox and nothing for scrapers to harvest.
+
+## 9. Corrections found in the final pass
+
+- **Retention did not clear the new device hash.** The identifier introduced in section 4 was not included in the anonymization sweep, so it would have persisted indefinitely on completed reports while the privacy notice implied otherwise. `cleanup_old_reports()` now nulls it alongside the other identifiers, and `test_retention_clears_every_report_identifier` fails if that is undone.
+- **The privacy notice now discloses the device identifier**, what it is for, that it is stored as a one-way hash, and that clearing site data clears the browser value.
+- **Model version bumped to `beta-heuristic-0.7`.** The plausibility filter changed estimator behaviour, and the version string is written into every persisted estimate. Leaving it at 0.6 would have made pre- and post-filter rows indistinguishable during calibration.
+- **The planning chart flattened** when the CSP blocked its inline bar-height attribute. Heights now go through the CSSOM, with a regression guard.
+- `schema.sql`, the proposed production schema, gained the identifier columns so it does not drift further from the running SQLite schema.
 
 ## Configuration added
 

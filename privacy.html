@@ -40,7 +40,8 @@
           <li>The timer start and completion timestamps.</li>
           <li>The resulting wait duration.</li>
           <li>Optional rounded location coordinates only when a future interface explicitly requests permission.</li>
-          <li>A daily salted identifier derived from request information for rate limiting and duplicate-report control.</li>
+          <li>A daily salted identifier derived from request information, used as a wide abuse backstop.</li>
+          <li>A one-way hash of a random identifier that the browser generates and stores locally. It distinguishes one device from another for rate limiting and duplicate control, so that visitors sharing a mobile network are not mistaken for one another. It contains no account, name, or location information, and the browser value can be cleared by clearing site data.</li>
         </ul>
         <p>The application does not store a visitor’s route, name, email address, or account information. Raw IP addresses are not printed in application request logs. The hosting provider may process ordinary request metadata under its own service terms.</p>
 
@@ -63,7 +64,7 @@
         <h2>Retention</h2>
         <ul>
           <li>Abandoned timer starts are deleted after approximately 24 hours.</li>
-          <li>Anonymous client identifiers and timer-token hashes are removed from completed reports after approximately 60 days.</li>
+          <li>Anonymous client identifiers, device-identifier hashes, and timer-token hashes are removed from completed reports after approximately 60 days.</li>
           <li>Feedback rate-limit identifiers are removed after approximately 30 days.</li>
           <li>Feedback submissions, including optional contact information, are deleted after approximately one year unless removed sooner.</li>
           <li>Aggregate estimates and non-identifying durations may be retained to evaluate and improve the beta.</li>
