@@ -114,7 +114,7 @@ python3 -m unittest discover -s tests -v
 - `PUBLIC_DEPLOYMENT.md` — Render deployment and beta checklist
 - `tests/test_server.py` — backend tests
 - `PRELAUNCH_UPDATE_NOTES.md` — v0.7.0 hardening changes and pre-deploy checklist
-- `QUEUE_AWARE_UPDATE_NOTES.md` — v0.8.0 extended-corridor, free-flow baseline, and queue-boundary changes
+- `QUEUE_AWARE_UPDATE_NOTES.md` — v0.8.1 queue-corridor, free-flow baseline, and queue-boundary changes
 
 ## Methodological status
 
@@ -132,4 +132,4 @@ Feedback records live in the same persistent SQLite database and are included in
 
 ## Public methodology
 
-The calculation is documented at `/methodology.html`. Visitors can submit calculation-specific comments through the existing private feedback workflow. The page documents model version `beta-heuristic-0.8`; the site release is v0.8.0. See `QUEUE_AWARE_UPDATE_NOTES.md` for the queue-aware estimator changes.
+The calculation is documented at `/methodology.html`. Visitors can submit calculation-specific comments through the existing private feedback workflow. The page documents model version `beta-heuristic-0.8.1`; the site release is v0.8.1. See `QUEUE_AWARE_UPDATE_NOTES.md` for the queue-aware estimator changes.

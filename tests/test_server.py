@@ -34,6 +34,15 @@ class ServerTests(unittest.TestCase):
             conn.execute("delete from condition_events")
             conn.execute("delete from feedback_submissions")
 
+    def test_nisqually_queue_v3_defaults(self):
+        entrance = server.ENTRANCES["nisqually"]
+        self.assertEqual(entrance["route_version"], "nisqually-queue-v3")
+        self.assertAlmostEqual(entrance["origin"]["latitude"], 46.751415, places=6)
+        self.assertAlmostEqual(entrance["origin"]["longitude"], -121.940160, places=6)
+        self.assertAlmostEqual(entrance["destination"]["latitude"], 46.740813, places=6)
+        self.assertAlmostEqual(entrance["destination"]["longitude"], -121.915494, places=6)
+        self.assertEqual(entrance["configured_free_flow_seconds"], 180)
+
     def test_google_duration_parser(self):
         self.assertEqual(server.parse_google_duration("3.5s"), 4)
         self.assertEqual(server.parse_google_duration("120s"), 120)

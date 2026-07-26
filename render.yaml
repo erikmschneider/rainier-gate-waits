@@ -34,17 +34,17 @@ services:
       - key: TRAFFIC_POLYLINE_NORMAL_GAP_METERS
         value: 300
       - key: NISQUALLY_ROUTE_ORIGIN_LAT
-        value: 46.7580
+        value: 46.751415
       - key: NISQUALLY_ROUTE_ORIGIN_LNG
-        value: -122.0500
+        value: -121.940160
       - key: NISQUALLY_ROUTE_DESTINATION_LAT
-        value: 46.7508
+        value: 46.740813
       - key: NISQUALLY_ROUTE_DESTINATION_LNG
-        value: -121.9175
+        value: -121.915494
       - key: NISQUALLY_ROUTE_VERSION
-        value: nisqually-extended-v1
+        value: nisqually-queue-v3
       - key: NISQUALLY_FREE_FLOW_SECONDS
-        value: 720
+        value: 180
       - key: WHITE_RIVER_ROUTE_ORIGIN_LAT
         value: 46.9160
       - key: WHITE_RIVER_ROUTE_ORIGIN_LNG

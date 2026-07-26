@@ -39,21 +39,21 @@
       <article class="methodology-card">
         <p class="eyebrow">Transparent by design</p>
         <h1>How estimates work</h1>
-        <p class="methodology-lead">Rainier Gate Waits is an experimental, independent service. It estimates entrance delay by comparing current travel time on an extended approach corridor with a route-specific free-flow baseline, then optionally adjusts that signal with recent community wait timers.</p>
+        <p class="methodology-lead">Rainier Gate Waits is an experimental, independent service. It estimates entrance delay by comparing current travel time on a fixed approach corridor with a route-specific free-flow baseline, then optionally adjusts that signal with recent community wait timers.</p>
 
         <div class="methodology-meta">
-          <span>Model: beta-heuristic-0.8</span>
-          <span>Last updated: July 25, 2026</span>
+          <span>Model: beta-heuristic-0.8.1</span>
+          <span>Last updated: July 26, 2026</span>
           <span>Applies to Nisqually and White River</span>
         </div>
 
         <div class="method-warning">
-          <strong>Important limitation:</strong> traffic travel time and Google speed categories are not direct measurements of an entrance-booth line. The extended corridors, free-flow baselines, queue-boundary rules, and weighting rules still require field calibration.
+          <strong>Important limitation:</strong> traffic travel time and Google speed categories are not direct measurements of an entrance-booth line. The selected corridors, free-flow baselines, queue-boundary rules, and weighting rules still require field calibration.
         </div>
 
         <h2 id="summary">Plain-language summary</h2>
         <ol>
-          <li>The service checks current traffic-aware travel time on an extended fixed corridor approaching each entrance.</li>
+          <li>The service checks current traffic-aware travel time on a fixed corridor approaching each entrance.</li>
           <li>It subtracts a route-specific free-flow baseline rather than Google's historically influenced <code>staticDuration</code>.</li>
           <li>Once per hour, it also requests traffic categories along the route to estimate where gate-connected congestion begins.</li>
           <li>Recent visitor timers can adjust the time estimate, but cannot create an estimate when recent traffic data is unavailable.</li>
@@ -67,7 +67,7 @@
           <strong>Baseline traffic delay</strong>
           <code>maximum of 0 and (current full-route travel time − route-specific free-flow baseline)</code>
         </div>
-        <p>Example: if the extended approach takes 12 minutes in free-flow conditions but currently takes 33 minutes, the baseline delay is 21 minutes.</p>
+        <p>Example: if a selected approach takes 3 minutes in free-flow conditions but currently takes 27 minutes, the baseline delay is 24 minutes.</p>
         <p>The provisional free-flow baseline is configured separately for each entrance. After at least 12 observations exist for the current route version, the service also calculates the lower tenth percentile of recent live route durations. That learned value may lower—but never raise—the configured baseline, which reduces the risk of hiding delay behind an historically congested comparison.</p>
         <p>Google's <code>staticDuration</code> is retained in private diagnostics for comparison, but it no longer determines the public wait. Google describes that value as reflecting historical traffic, so subtracting it could show only delay beyond an already-busy historical expectation.</p>
         <p>This method still assumes that most unusual delay on the selected corridor is related to entrance access. Construction, collisions, roadside activity, weather, or congestion unrelated to the gate can violate that assumption.</p>
@@ -173,7 +173,7 @@
 
         <h2 id="limitations">Known limitations and open questions</h2>
         <ul>
-          <li>Even the extended corridor may not reach the back of an exceptional queue.</li>
+          <li>Even a corridor selected to cover the usual maximum backup may not reach the back of an exceptional queue.</li>
           <li>The hourly speed categories may place the congestion boundary differently from the yellow and red styling visible in the consumer Google Maps interface.</li>
           <li>The provisional free-flow baselines and corridor coordinates have not yet been validated with paired field observations.</li>
           <li>Traffic delay may include congestion unrelated to the entrance booths.</li>

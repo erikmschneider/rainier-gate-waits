@@ -72,7 +72,7 @@ BACKUP_DIR = Path(os.environ.get("RAINIER_BACKUP_DIR", DB_PATH.parent / "backups
 FEEDBACK_RATE_LIMIT_PER_HOUR = max(1, int(os.environ.get("FEEDBACK_RATE_LIMIT_PER_HOUR", "5")))
 FEEDBACK_IDENTIFIER_RETENTION_DAYS = max(1, int(os.environ.get("FEEDBACK_IDENTIFIER_RETENTION_DAYS", "30")))
 FEEDBACK_RETENTION_DAYS = max(FEEDBACK_IDENTIFIER_RETENTION_DAYS, int(os.environ.get("FEEDBACK_RETENTION_DAYS", "365")))
-SITE_VERSION = "0.8.0"
+SITE_VERSION = "0.8.1"
 # The published confidence band stays capped until the approach geometry has
 # been checked against paired field observations at both entrances.
 ESTIMATOR_FIELD_CALIBRATED = os.environ.get("ESTIMATOR_FIELD_CALIBRATED", "false").lower() in {"1", "true", "yes"}
@@ -141,16 +141,16 @@ ENTRANCES: dict[str, dict[str, Any]] = {
         "name": "Nisqually Entrance",
         "approach": "From Ashford via WA-706",
         "origin": {
-            "latitude": env_float("NISQUALLY_ROUTE_ORIGIN_LAT", 46.7580),
-            "longitude": env_float("NISQUALLY_ROUTE_ORIGIN_LNG", -122.0500),
+            "latitude": env_float("NISQUALLY_ROUTE_ORIGIN_LAT", 46.751415),
+            "longitude": env_float("NISQUALLY_ROUTE_ORIGIN_LNG", -121.940160),
         },
         "destination": {
-            "latitude": env_float("NISQUALLY_ROUTE_DESTINATION_LAT", 46.7508),
-            "longitude": env_float("NISQUALLY_ROUTE_DESTINATION_LNG", -121.9175),
+            "latitude": env_float("NISQUALLY_ROUTE_DESTINATION_LAT", 46.740813),
+            "longitude": env_float("NISQUALLY_ROUTE_DESTINATION_LNG", -121.915494),
         },
         "route": "706",
-        "route_version": os.environ.get("NISQUALLY_ROUTE_VERSION", "nisqually-extended-v1"),
-        "configured_free_flow_seconds": env_int("NISQUALLY_FREE_FLOW_SECONDS", 720, 60),
+        "route_version": os.environ.get("NISQUALLY_ROUTE_VERSION", "nisqually-queue-v3"),
+        "configured_free_flow_seconds": env_int("NISQUALLY_FREE_FLOW_SECONDS", 180, 60),
         "seasonal": False,
     },
     "white-river": {
@@ -1322,7 +1322,7 @@ def persist_estimate(slug: str, estimate: Estimate) -> None:
                 estimate.confidence_score, estimate.confidence_level,
                 estimate.recent_report_count, estimate.traffic_delay_seconds,
                 estimate.data_mode, json.dumps(estimate.basis, separators=(",", ":")),
-                "beta-heuristic-0.8",
+                "beta-heuristic-0.8.1",
             ),
         )
 
